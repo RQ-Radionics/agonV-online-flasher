@@ -215,16 +215,6 @@ class AgonVFlasher {
             //    esp-web-tools shows "Hold BOOT button" only on failure.
             //    We do the same: just call main() and show the error if it fails.
             const chip = await this.loader.main();
-            this.log(t('msgConnected', { chip }), 'success');
-            this.setStatus('connected', 'connected');
-
-            // Bump baud if needed
-            const baud = parseInt(document.getElementById('cfgBaud').value, 10);
-            if (baud !== 115200) {
-                this.log(t('msgChangeBaud', { baud }), 'info');
-                await this.loader.changeBaud();
-                this.log(t('msgChangeBaudOK', { baud }), 'success');
-            }
 
             document.getElementById('disconnectBtn').disabled = false;
             this._refreshFlashBtn();
