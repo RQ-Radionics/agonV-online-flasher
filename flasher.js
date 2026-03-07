@@ -197,17 +197,8 @@ class AgonVFlasher {
         document.getElementById('connectBtn').disabled = true;
 
         try {
-            // Show boot instructions FIRST — user puts chip in bootloader.
-            // We don't touch the port yet because on USB-JTAG chips the port
-            // may re-enumerate when entering bootloader mode.
-            this.log(t('msgBootInstructions'), 'info');
-            await this._showBootModal();
-
-            // NOW pick the port — after the chip is already in bootloader.
-            // This ensures we get the valid post-enumeration port object.
             this.device = await navigator.serial.requestPort();
 
-            // Build Transport + ESPLoader
             this.transport = new Transport(this.device);
             this.loader = new ESPLoader({
                 transport: this.transport,
@@ -215,7 +206,6 @@ class AgonVFlasher {
                 terminal:  makeTerminal((m, tp) => this.log(m, tp)),
             });
 
-            // Connect — 'no_reset': don't touch RTS/DTR, just sync.
             const chip = await this.loader.main('no_reset');
             this.log(t('msgConnected', { chip }), 'success');
             this.setStatus('connected', 'connected');
