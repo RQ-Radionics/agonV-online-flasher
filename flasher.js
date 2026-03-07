@@ -595,18 +595,81 @@ class ESP32P4 {
         this.log(t('msgChangeBaudOK', { baud: newBaud }), 'success');
     }
 
+    // ── disable watchdogs (mirrors esptool _post_connect / disable_watchdogs) ──
+    //
+    // When USB-JTAG/Serial is used, the RTC WDT and SWD watchdog are NOT reset
+    // by the ROM bootloader and can fire during stub upload / flash, resetting
+    // the board silently.  We must disable them before uploading the stub,
+    // exactly as esptool does in ESP32P4ROM._post_connect().
+    //
+    // RTC WDT registers (LP_WDT):
+    //   0x50116000  LP_WDT_CONFIG0   – set to 0 to disable
+    //   0x50116018  LP_WDT_WPROTECT  – write key 0x50D83AA1 to unlock, 0 to lock
+    //
+    // SWD (Super Watchdog):
+    //   0x5011601C  RTC_WDT_SWD_CONFIG_REG  – bit 18 = SWD_AUTO_FEED_EN
+    //   0x50116020  RTC_WDT_SWD_WPROTECT    – same key
+
+    async disableWatchdogs() {
+        const WDT_CONFIG0   = 0x50116000;
+        const WDT_WPROTECT  = 0x50116018;
+        const SWD_CONF_REG  = 0x5011601C;
+        const SWD_WPROTECT  = 0x50116020;
+        const WDT_KEY       = 0x50D83AA1;
+        const SWD_AUTO_FEED = (1 << 18);
+
+        this.log('Disabling RTC WDT and SWD…', 'debug');
+        // Disable RTC WDT
+        await this._writeReg(WDT_WPROTECT, WDT_KEY);   // unlock
+        await this._writeReg(WDT_CONFIG0,  0);          // disable
+        await this._writeReg(WDT_WPROTECT, 0);          // lock
+
+        // Enable SWD auto-feed (keeps SWD alive so it doesn't fire)
+        await this._writeReg(SWD_WPROTECT, WDT_KEY);   // unlock
+        const swdCfg = await this.readReg(SWD_CONF_REG);
+        await this._writeReg(SWD_CONF_REG, swdCfg | SWD_AUTO_FEED);
+        await this._writeReg(SWD_WPROTECT, 0);          // lock
+        this.log('Watchdogs disabled.', 'debug');
+    }
+
+    // ── read UARTDEV_BUF_NO (detect USB-JTAG) ────────────────────────────────
+    //
+    // The ROM keeps a variable at a revision-dependent address that reflects
+    // which UART/USB port is active.  Value 6 = USB-JTAG/Serial.
+    // rev < 300 → base 0x4FF3FEB0,  rev >= 300 → base 0x4FFBFEB0,  offset +24.
+
+    async readUartDevBufNo() {
+        const base = (this.chipRevision < 300) ? 0x4FF3FEB0 : 0x4FFBFEB0;
+        const addr = base + 24;
+        try {
+            const val = await this.readReg(addr);
+            this.log(`UARTDEV_BUF_NO @ 0x${addr.toString(16)}: ${val} (USB-JTAG = ${val === 6 ? 'YES ✓' : 'NO – unexpected!'})`, 'debug');
+            return val;
+        } catch (e) {
+            this.log(`Could not read UARTDEV_BUF_NO: ${e.message}`, 'warning');
+            return -1;
+        }
+    }
+
     // ── stub loader upload ────────────────────────────────────────────────────
     //
     // Mirrors esptool _upload_stub():
+    //   0. disable_watchdogs()  (esptool _post_connect)
     //   1. mem_begin(text_len, blocks, block_size, text_start)
     //   2. mem_data(block)... for text segment
     //   3. mem_begin(data_len, blocks, block_size, data_start)
     //   4. mem_data(block)... for data segment
     //   5. mem_end(0, entry)  → jump to stub entry point
-    //   6. Read "OHAI" 4-byte magic from stub to confirm it's running
+    //   6. Read SLIP-framed "OHAI" (C0 4F 48 41 49 C0) from stub
 
     async uploadStub() {
         this.log(t('msgStubUpload'), 'info');
+
+        // Step 0: disable watchdogs (prevents WDT reset during stub upload)
+        await this.disableWatchdogs();
+
+        // Log UARTDEV_BUF_NO so we can confirm USB-JTAG is active
+        await this.readUartDevBufNo();
 
         // Select stub based on chip revision:
         // revision < 300 (i.e. rev 1.x, 2.x) → RC1 stub
@@ -622,19 +685,44 @@ class ESP32P4 {
             await this._uploadSegment(data, stub.data_start);
         }
 
-        // mem_end: reboot=0 (run), entry point
+        // mem_end: flag=0 (run), entry point
+        // The ROM sends a SLIP ACK for mem_end, then immediately the stub
+        // starts and sends raw (non-SLIP) "OHAI" (0x4F 0x48 0x41 0x49).
         const endData = new Uint8Array(8);
         const ev = new DataView(endData.buffer);
-        ev.setUint32(0, 0,     true); // flag: 0 = jump to entry
+        ev.setUint32(0, 0,          true); // flag=0 → jump to entry
         ev.setUint32(4, stub.entry, true);
-        await this._cmd(CMD_MEM_END, endData, 0, 3000);
 
-        // Stub signals it's running by sending 4 bytes: 0x4F 0x48 0x41 0x49 ("OHAI")
-        const ohai = await this.s.waitBytes(4, 3000);
-        if (ohai[0] !== 0x4F || ohai[1] !== 0x48 || ohai[2] !== 0x41 || ohai[3] !== 0x49) {
-            throw new Error(`Stub handshake failed: got [${Array.from(ohai).map(b=>'0x'+b.toString(16)).join(',')}]`);
+        // Send MEM_END with short timeout — the ROM ACK comes back quickly,
+        // then the stub starts and sends SLIP-framed OHAI: C0 4F 48 41 49 C0.
+        // esptool uses MEM_END_ROM_TIMEOUT = 0.2s, reads the ACK, then reads
+        // the next SLIP packet which IS the OHAI.
+        const endPkt = buildPacket(CMD_MEM_END, endData, 0);
+        await this.s.write(slipEncode(endPkt));
+
+        // Read the ROM ACK for MEM_END (short timeout — may be fast or miss-able)
+        try {
+            const ack = await this.s.readSlipPacket(500);
+            this.log(`MEM_END ACK: status=${ack[8]} err=${ack[9]}`, 'debug');
+        } catch (_) {
+            this.log('MEM_END ACK timeout (ok — stub may have consumed it)', 'debug');
         }
 
+        // Now read the SLIP-framed OHAI from the stub
+        // esptool: p = self.read()  → slip-decoded bytes → b"OHAI"
+        this.log(`Waiting for OHAI… (${this.s.rxLen}B already in buffer: ${this.s.peekRaw(32)})`, 'debug');
+        const ohai = await this.s.readSlipPacket(3000);
+        const ohaiHex = Array.from(ohai).map(b => b.toString(16).padStart(2,'0')).join(' ');
+        this.log(`OHAI packet (${ohai.length}B): ${ohaiHex}`, 'debug');
+
+        // Verify it spells "OHAI"
+        if (ohai.length < 4 ||
+            ohai[0] !== 0x4F || ohai[1] !== 0x48 ||
+            ohai[2] !== 0x41 || ohai[3] !== 0x49) {
+            throw new Error(`Stub sent unexpected response instead of OHAI: ${ohaiHex}`);
+        }
+
+        this.s.flushRx();
         this.stubRunning = true;
         this.log(t('msgStubReady'), 'success');
     }
