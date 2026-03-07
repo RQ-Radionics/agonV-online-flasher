@@ -417,7 +417,7 @@ class ESP32P4 {
     // Flash geometry
     static SECTOR      = 4096;    // 4 KB erase unit
     static CHUNK       = 0x4000;  // 16 KB per flash_data / flash_defl_data packet
-    static MEM_CHUNK   = 0x1800;  // 6 KB per mem_data packet (stub upload)
+    static MEM_CHUNK   = 0x800;   // 2 KB per mem_data packet (stub upload) — conservative for USB-JTAG ROM
 
     constructor(serial, logFn) {
         this.s       = serial;
@@ -792,6 +792,8 @@ class ESP32P4 {
         const chunkSize = ESP32P4.MEM_CHUNK;
         const numBlocks = Math.ceil(segment.length / chunkSize);
 
+        this.log(`mem_begin: addr=0x${loadAddr.toString(16)} size=${segment.length} blocks=${numBlocks} chunkSize=${chunkSize}`, 'debug');
+
         // mem_begin
         const beginData = new Uint8Array(16);
         const bv = new DataView(beginData.buffer);
@@ -800,12 +802,15 @@ class ESP32P4 {
         bv.setUint32(8,  chunkSize,      true);
         bv.setUint32(12, loadAddr,       true);
         await this._cmd(CMD_MEM_BEGIN, beginData, 0, 3000);
+        this.log(`mem_begin OK`, 'debug');
 
         // mem_data blocks
         for (let seq = 0; seq < numBlocks; seq++) {
             const start = seq * chunkSize;
             const end   = Math.min(start + chunkSize, segment.length);
             const chunk = segment.slice(start, end);
+
+            this.log(`mem_data seq=${seq} size=${chunk.length}`, 'debug');
 
             const pkt = new Uint8Array(16 + chunk.length);
             const pv  = new DataView(pkt.buffer);
@@ -816,7 +821,9 @@ class ESP32P4 {
             pkt.set(chunk, 16);
             const chk = espChecksum(chunk);
             await this._cmd(CMD_MEM_DATA, pkt, chk, 3000);
+            this.log(`mem_data seq=${seq} OK`, 'debug');
         }
+        this.log(`segment 0x${loadAddr.toString(16)} done`, 'debug');
     }
 
     // ── flash_defl_begin (stub only) ──────────────────────────────────────────
