@@ -200,23 +200,20 @@ class AgonVFlasher {
             // 1. Pick port
             this.device = await navigator.serial.requestPort();
 
-            // 2. Open port explicitly (esp-web-tools pattern)
-            await this.device.open({ baudRate: 115200, bufferSize: 8192 });
-
-            // 3. Build Transport + ESPLoader with already-open port.
-            // Patch transport.connect() so ESPLoader doesn't try to open() again.
+            // 2. Build Transport + ESPLoader with CLOSED port.
+            //    ESPLoader.main() will open it internally at romBaudrate.
+            //    This is the exact pattern used by esp-web-tools/flash.ts.
             this.transport = new Transport(this.device);
-            this.transport.connect = async () => { this.transport.baudrate = 115200; };
             this.loader = new ESPLoader({
-                transport: this.transport,
-                baudrate:  115200,
-                terminal:  makeTerminal((m, tp) => this.log(m, tp)),
+                transport:   this.transport,
+                baudrate:    115200,
+                romBaudrate: 115200,
+                terminal:    makeTerminal((m, tp) => this.log(m, tp)),
             });
 
-            // 4. Show instructions — user puts chip in bootloader, clicks Done
-            await this._showBootModal();
-
-            // 5. Sync immediately
+            // 3. Connect — chip must be in bootloader.
+            //    esp-web-tools shows "Hold BOOT button" only on failure.
+            //    We do the same: just call main() and show the error if it fails.
             const chip = await this.loader.main('no_reset');
             this.log(t('msgConnected', { chip }), 'success');
             this.setStatus('connected', 'connected');
