@@ -485,9 +485,10 @@ class ESP32P4 {
     async enterBootloader() {
         this.log('Manual boot required — showing instructions…', 'info');
         this.s.flushRx();
-        // _showBootModal resolves on sync or rejects on cancel/timeout
-        // The modal is always closed before the promise settles
-        await this._showBootModal(30);
+        // Show the modal with instructions — it resolves when the user
+        // clicks OK/Close (or after timeout). We don't try to sync here;
+        // the sync loop below handles that independently.
+        await this._showBootModal(60);
     }
 
     async resetHard() {
@@ -524,94 +525,85 @@ class ESP32P4 {
     }
 
     async _showBootModal(seconds) {
+        // Modal is purely informational — shows instructions and a countdown.
+        // Resolves when the user clicks OK, or after timeout.
+        // Never rejects (cancel = OK, just means "I'm ready").
         const modal     = document.getElementById('bootModal');
         const timerEl   = document.getElementById('modalTimer');
         const cancelBtn = document.getElementById('modalCancelBtn');
 
         modal.style.display = 'flex';
 
-        // Wrap everything in a promise so we can resolve/reject cleanly
-        // and ALWAYS close the modal before resolving
-        return new Promise((resolve, reject) => {
-            let done     = false;
-            let intervalId, tickId;
+        return new Promise((resolve) => {
+            let done = false;
+            let tickId;
 
-            const finish = (err) => {
+            const finish = () => {
                 if (done) return;
                 done = true;
-                clearInterval(intervalId);
                 clearInterval(tickId);
                 this._closeModal();
-                if (err) reject(err);
-                else     resolve();
+                resolve();
             };
 
-            // Cancel button
-            cancelBtn.addEventListener('click', () => {
-                finish(new Error('Cancelled by user.'));
-            }, { once: true });
+            // OK/Cancel button — user says "I've done the boot sequence"
+            cancelBtn.addEventListener('click', finish, { once: true });
 
-            const syncData = new Uint8Array([0x07, 0x07, 0x12, 0x20, ...new Array(32).fill(0x55)]);
             const deadline = Date.now() + seconds * 1000;
-
-            // Update countdown display every second
             tickId = setInterval(() => {
                 if (done) return;
                 const rem = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
                 timerEl.textContent = rem;
+                if (rem === 0) finish();
             }, 250);
-
-            // Try sync every 800ms
-            let syncing = false;
-            intervalId = setInterval(async () => {
-                if (done || syncing) return;
-                if (Date.now() >= deadline) {
-                    finish(new Error(t('msgBootTimeout')));
-                    return;
-                }
-                syncing = true;
-                try {
-                    this.s.flushRx();
-
-                    // Send SYNC — use raw write+read (not _cmd loop) to avoid
-                    // retry logic consuming the extra ACKs that follow SYNC.
-                    const syncPkt = buildPacket(CMD_SYNC, syncData, 0);
-                    await this.s.write(slipEncode(syncPkt));
-
-                    // Wait for at least one valid SYNC response (direction=1, op=0x08)
-                    let gotSync = false;
-                    const t0 = Date.now();
-                    while (Date.now() - t0 < 600) {
-                        let resp;
-                        try { resp = await this.s.readSlipPacket(100); } catch (_) { break; }
-                        if (resp.length >= 8 && resp[0] === 0x01 && resp[1] === CMD_SYNC) {
-                            gotSync = true;
-                            break;
-                        }
-                    }
-                    if (!gotSync) { syncing = false; return; }
-
-                    // Drain ALL remaining SYNC ACKs — the ROM sends up to 8 total.
-                    // Wait 120ms (esptool DEFAULT_TIMEOUT for drain) then flush.
-                    await delay(120);
-                    this.s.flushRx();
-
-                    this.log(t('msgSyncOK'), 'success');
-                    finish(null);
-                } catch (_) {
-                    // not yet in bootloader
-                }
-                syncing = false;
-            }, 800);
         });
     }
 
     // ── sync ─────────────────────────────────────────────────────────────────
+    //
+    // Mirrors esptool _connect_attempt(): try up to N times, flush between.
+    // Each attempt: send SYNC, read 8 responses (1 + 7 extras), flush remainder.
 
-    // sync() is called AFTER enterBootloader() has already verified one sync.
-    // This is a no-op — the modal already completed the sync handshake.
     async sync() {
-        // Already synced in _showBootModal — nothing to do here.
+        this.log(t('msgSync'), 'info');
+        const syncData = new Uint8Array([0x07, 0x07, 0x12, 0x20, ...new Array(32).fill(0x55)]);
+
+        for (let attempt = 0; attempt < 10; attempt++) {
+            this.s.flushRx();
+            try {
+                // Send SYNC
+                const syncPkt = buildPacket(CMD_SYNC, syncData, 0);
+                await this.s.write(slipEncode(syncPkt));
+
+                // Read first ACK — must match op=0x08, direction=1
+                let gotFirst = false;
+                const t0 = Date.now();
+                while (Date.now() - t0 < 500) {
+                    let resp;
+                    try { resp = await this.s.readSlipPacket(100); } catch (_) { break; }
+                    if (resp.length >= 8 && resp[0] === 0x01 && resp[1] === CMD_SYNC) {
+                        gotFirst = true;
+                        break;
+                    }
+                }
+                if (!gotFirst) continue;
+
+                // Drain remaining 7 ACKs (ROM sends 8 total)
+                for (let i = 0; i < 7; i++) {
+                    try { await this.s.readSlipPacket(100); } catch (_) { break; }
+                }
+                // Flush anything left
+                await delay(50);
+                this.s.flushRx();
+
+                this.log(t('msgSyncOK'), 'success');
+                return; // success
+            } catch (_) {
+                // retry
+            }
+            await delay(100);
+        }
+        throw new Error('Could not sync with bootloader after 10 attempts.');
     }
 
     // ── read register ─────────────────────────────────────────────────────────
