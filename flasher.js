@@ -558,15 +558,34 @@ class ESP32P4 {
                 syncing = true;
                 try {
                     this.s.flushRx();
-                    await this._cmd(CMD_SYNC, syncData, 0, 600);
-                    // drain extra ACKs
-                    for (let j = 0; j < 8; j++) {
-                        try { await this.s.readSlipPacket(100); } catch (_) {}
+
+                    // Send SYNC — use raw write+read (not _cmd loop) to avoid
+                    // retry logic consuming the extra ACKs that follow SYNC.
+                    const syncPkt = buildPacket(CMD_SYNC, syncData, 0);
+                    await this.s.write(slipEncode(syncPkt));
+
+                    // Wait for at least one valid SYNC response (direction=1, op=0x08)
+                    let gotSync = false;
+                    const t0 = Date.now();
+                    while (Date.now() - t0 < 600) {
+                        let resp;
+                        try { resp = await this.s.readSlipPacket(100); } catch (_) { break; }
+                        if (resp.length >= 8 && resp[0] === 0x01 && resp[1] === CMD_SYNC) {
+                            gotSync = true;
+                            break;
+                        }
                     }
+                    if (!gotSync) { syncing = false; return; }
+
+                    // Drain ALL remaining SYNC ACKs — the ROM sends up to 8 total.
+                    // Wait 120ms (esptool DEFAULT_TIMEOUT for drain) then flush.
+                    await delay(120);
+                    this.s.flushRx();
+
                     this.log(t('msgSyncOK'), 'success');
                     finish(null);
                 } catch (_) {
-                    // not yet
+                    // not yet in bootloader
                 }
                 syncing = false;
             }, 800);
@@ -603,7 +622,7 @@ class ESP32P4 {
             const minor = word & 0x0F;
             this.chipRevision = major * 100 + minor;
             this.chip = `ESP32-P4 (rev ${major}.${minor})`;
-        } catch (_) { this.chip = 'ESP32-P4'; }
+        } catch (e) { this.chip = 'ESP32-P4'; this.log(`detectChip fallback: ${e.message}`, 'debug'); }
         this.log(t('msgChipFound', { chip: this.chip }), 'success');
         return this.chip;
     }
