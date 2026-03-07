@@ -718,9 +718,6 @@ class ESP32P4 {
     async uploadStub() {
         this.log(t('msgStubUpload'), 'info');
 
-        // Step 0: disable watchdogs (prevents WDT reset during stub upload)
-        await this.disableWatchdogs();
-
         // Log UARTDEV_BUF_NO so we can confirm USB-JTAG is active
         await this.readUartDevBufNo();
 
@@ -1318,6 +1315,14 @@ class AgonVFlasher {
             await this.esp.enterBootloader();
 
             await this.esp.sync();
+
+            // Disable watchdogs IMMEDIATELY after sync, before any other command.
+            // The firmware running before bootloader entry may have armed the LP WDT
+            // and SWD with short timeouts — they will fire within ~1-2s and reset
+            // the chip silently, causing all subsequent commands to see empty buffers.
+            // esptool does this in _post_connect() which runs right after connect().
+            await this.esp.disableWatchdogs();
+
             await this.esp.detectChip();
 
             // Upload stub — required for USB-JTAG/Serial mode and deflate flash
