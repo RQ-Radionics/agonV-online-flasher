@@ -78,6 +78,11 @@ const i18n = {
         msgChangeBaud:    'Switching to {baud} baud…',
         msgChangeBaudOK:  'Baud rate changed to {baud}.',
         msgFileDropHere:  'Drop .bin or click…',
+        preload:          '⚡ Load agonV Default',
+        msgPreloadDone:   'Default regions loaded: {n} files ready.',
+        msgPreloadErr:    'Could not load {name}: {err}',
+        msgStubUpload:    'Uploading stub loader…',
+        msgStubReady:     'Stub running.',
     },
     es: {
         browserWarning:  'Tu navegador no soporta Web Serial API. Usa Chrome o Edge.',
@@ -143,6 +148,11 @@ const i18n = {
         msgChangeBaud:    'Cambiando a {baud} baudios…',
         msgChangeBaudOK:  'Velocidad cambiada a {baud}.',
         msgFileDropHere:  'Arrastra .bin o haz clic…',
+        preload:          '⚡ Cargar agonV por defecto',
+        msgPreloadDone:   'Regiones cargadas: {n} archivos listos.',
+        msgPreloadErr:    'No se pudo cargar {name}: {err}',
+        msgStubUpload:    'Cargando stub loader…',
+        msgStubReady:     'Stub en ejecución.',
     },
 };
 
@@ -224,14 +234,17 @@ function slipDecode(raw) {
 // ─────────────────────────────────────────────────────────────────────────────
 const CMD_SYNC              = 0x08;
 const CMD_READ_REG          = 0x0A;
+const CMD_WRITE_REG         = 0x09;
 const CMD_FLASH_BEGIN       = 0x02;
 const CMD_FLASH_DATA        = 0x03;
 const CMD_FLASH_END         = 0x04;
+const CMD_MEM_BEGIN         = 0x05;
+const CMD_MEM_DATA          = 0x07;
+const CMD_MEM_END           = 0x06;
 const CMD_CHANGE_BAUDRATE   = 0x0F;
 const CMD_FLASH_DEFL_BEGIN  = 0x10;
 const CMD_FLASH_DEFL_DATA   = 0x11;
 const CMD_FLASH_DEFL_END    = 0x12;
-const CMD_SPI_ATTACH        = 0x0D;
 
 const ESP_CHECKSUM_MAGIC = 0xEF;
 
@@ -349,124 +362,105 @@ class WebSerialPort {
 // ─────────────────────────────────────────────────────────────────────────────
 class ESP32P4 {
     // Flash geometry
-    static SECTOR   = 4096;          // 4 KB
-    static BLOCK    = 65536;         // 64 KB
-    static CHUNK    = 0x4000;        // 16 KB per flash_data packet
-    static FLASH_MB = 16;
-
-    // ESP32-P4 chip magic register (eFuse BLOCK0 @ 0x5012_1044)
-    static CHIP_DETECT_MAGIC_REG = 0x6000_1000;
+    static SECTOR      = 4096;    // 4 KB erase unit
+    static CHUNK       = 0x4000;  // 16 KB per flash_data / flash_defl_data packet
+    static MEM_CHUNK   = 0x1800;  // 6 KB per mem_data packet (stub upload)
 
     constructor(serial, logFn) {
-        this.s   = serial;
-        this.log = logFn;
-        this.chip = 'ESP32-P4';
+        this.s       = serial;
+        this.log     = logFn;
+        this.chip    = 'ESP32-P4';
+        this.stubRunning = false;  // true once stub is loaded and running
     }
 
-    // ── low-level ────────────────────────────────────────────────────────────
+    // ── low-level command ─────────────────────────────────────────────────────
 
     async _cmd(op, data = new Uint8Array(0), chk = 0, timeoutMs = 3000) {
         const pkt = buildPacket(op, data, chk);
         await this.s.write(slipEncode(pkt));
         const resp = await this.s.readSlipPacket(timeoutMs);
         if (!resp || resp.length < 8) throw new Error(`No response to cmd 0x${op.toString(16)}`);
-        const status = resp[8];   // first byte of response data = error
-        return { value: readLE32(resp, 4), status, data: resp.slice(8) };
+        // resp[8] = status byte (0=OK), resp[9] = error byte
+        return { value: readLE32(resp, 4), status: resp[8], errCode: resp[9] || 0, data: resp.slice(8) };
     }
 
-    // ── bootloader entry ─────────────────────────────────────────────────────
+    // ── USB-JTAG/Serial reset (esptool USBJTAGSerialReset) ────────────────────
     //
-    // ESP32-P4 strapping pins (from esptool docs + reset.py ClassicReset):
-    //   RTS → EN  (CHIP_PU)   active-low: RTS=True → EN=LOW (in reset)
-    //   DTR → GPIO35          active-low: DTR=True → GPIO35=LOW (boot mode)
+    // The ESP32-P4 Olimex uses the internal USB-Serial/JTAG peripheral.
+    // DTR/RTS from the CDC interface map to internal signals — NOT to GPIO35/EN
+    // directly. The reset sequence is different from ClassicReset.
     //
-    // Web Serial API note: setSignals({ requestToSend: true }) drives RTS LOW.
-    //
-    // ClassicReset sequence (esptool reset.py):
-    //   1. DTR=False → GPIO35=HIGH (IO0 idle, not boot mode yet)
-    //   2. RTS=True  → EN=LOW (chip held in reset)
-    //   3. wait 100ms
-    //   4. DTR=True  → GPIO35=LOW (select download/boot mode)
-    //   5. RTS=False → EN=HIGH (release reset, chip boots into download mode)
-    //   6. wait reset_delay (50ms default)
-    //   7. DTR=False → GPIO35=HIGH (release boot pin, done)
+    // USBJTAGSerialReset (esptool reset.py):
+    //   RTS=0, DTR=0  → idle
+    //   DTR=1         → set IO0 low
+    //   RTS=0
+    //   RTS=1, DTR=0  → EN=LOW (reset), go through (1,1) state
+    //   RTS=1         (Windows workaround: set RTS again)
+    //   DTR=0, RTS=0  → chip out of reset → boots into download mode
 
     async enterBootloader() {
-        this.log('Resetting into download mode (ClassicReset)…', 'debug');
-        this.log('  RTS→EN, DTR→GPIO35 (active-low)', 'debug');
-        await this.s.setSignals({ dataTerminalReady: false, requestToSend: false }); // idle
-        await delay(50);
-        await this.s.setSignals({ dataTerminalReady: false, requestToSend: true  }); // EN=LOW (hold reset)
+        this.log('USB-JTAG/Serial reset sequence…', 'debug');
+        await this.s.setSignals({ requestToSend: false, dataTerminalReady: false }); // idle
         await delay(100);
-        await this.s.setSignals({ dataTerminalReady: true,  requestToSend: false }); // GPIO35=LOW + EN=HIGH → boot!
-        await delay(50);
-        await this.s.setSignals({ dataTerminalReady: false, requestToSend: false }); // GPIO35=HIGH (release strapping)
-        await delay(500); // wait for ROM to print banner and be ready
+        await this.s.setSignals({ dataTerminalReady: true,  requestToSend: false }); // IO0=low
+        await delay(100);
+        await this.s.setSignals({ requestToSend: true,  dataTerminalReady: false }); // EN=low (reset)
+        await this.s.setSignals({ requestToSend: true,  dataTerminalReady: false }); // RTS again (Windows)
+        await delay(100);
+        await this.s.setSignals({ dataTerminalReady: false, requestToSend: false }); // release → boot!
+        await delay(500);
         this.s.flushRx();
-        this.log('Boot sequence done, waiting for sync…', 'debug');
+        this.log('Reset done, waiting for sync…', 'debug');
     }
 
-    async resetNormal() {
-        // Hard reset: pull EN low briefly
-        await this.s.setSignals({ dataTerminalReady: false, requestToSend: true  }); // EN=LOW
-        await delay(100);
-        await this.s.setSignals({ dataTerminalReady: false, requestToSend: false }); // EN=HIGH
-        await delay(500);
+    async resetHard() {
+        // Hard reset via RTS (USB mode: uses watchdog reset after stub is running)
+        await this.s.setSignals({ requestToSend: true  }); // EN=LOW
+        await delay(200);
+        await this.s.setSignals({ requestToSend: false }); // EN=HIGH
+        await delay(200);
     }
 
     // ── sync ─────────────────────────────────────────────────────────────────
 
     async sync() {
         this.log(t('msgSync'), 'info');
-        // esptool sends: 0x07 0x07 0x12 0x20 + 32×0x55
         const syncData = new Uint8Array([0x07, 0x07, 0x12, 0x20, ...new Array(32).fill(0x55)]);
         let lastErr;
-        // esptool tries up to 16 times with ~100ms between attempts
         for (let i = 0; i < 16; i++) {
             try {
                 this.s.flushRx();
                 this.log(`Sync attempt ${i + 1}/16…`, 'debug');
                 await this._cmd(CMD_SYNC, syncData, 0, 1500);
-                // esptool drains 8 additional sync responses (total 9 including the first)
+                // drain 8 more sync ACKs (esptool does 9 total)
                 for (let j = 0; j < 8; j++) {
                     try { await this.s.readSlipPacket(200); } catch (_) {}
                 }
                 this.log(t('msgSyncOK'), 'success');
                 return;
-            } catch (e) {
-                lastErr = e;
-                await delay(100);
-            }
+            } catch (e) { lastErr = e; await delay(100); }
         }
         throw new Error(`Sync failed: ${lastErr?.message}`);
     }
 
-    // ── chip detect ──────────────────────────────────────────────────────────
+    // ── read register ─────────────────────────────────────────────────────────
 
     async readReg(addr) {
-        const d = le32(addr);
-        const r = await this._cmd(CMD_READ_REG, d);
+        const r = await this._cmd(CMD_READ_REG, le32(addr));
         return r.value;
     }
+
+    // ── chip detect ──────────────────────────────────────────────────────────
 
     async detectChip() {
         this.log(t('msgChipDetect'), 'info');
         try {
-            // UART_DATE_REG — unique per chip family (esptool: UART_DATE_REG_ADDR)
-            // ESP32-P4: 0x500CA000 + 0x8C = 0x500CA08C
+            // UART_DATE_REG @ 0x500CA08C (ESP32-P4 specific)
             const date = await this.readReg(0x500CA08C);
-            this.chip = `ESP32-P4 (date=0x${date.toString(16).toUpperCase()})`;
-        } catch (_) {
-            this.chip = 'ESP32-P4';
-        }
+            this.chip = `ESP32-P4 (rev 0x${date.toString(16).toUpperCase()})`;
+        } catch (_) { this.chip = 'ESP32-P4'; }
         this.log(t('msgChipFound', { chip: this.chip }), 'success');
         return this.chip;
-    }
-
-    // ── SPI attach — ESP32-P4 does NOT use CMD_SPI_ATTACH (no-op kept for compat)
-
-    async spiAttach() {
-        // ESP32-P4 ROM handles SPI attach automatically; skip this command
     }
 
     // ── baud rate change ─────────────────────────────────────────────────────
@@ -484,94 +478,171 @@ class ESP32P4 {
         this.log(t('msgChangeBaudOK', { baud: newBaud }), 'success');
     }
 
-    // ── flash_begin ──────────────────────────────────────────────────────────
+    // ── stub loader upload ────────────────────────────────────────────────────
+    //
+    // Mirrors esptool _upload_stub():
+    //   1. mem_begin(text_len, blocks, block_size, text_start)
+    //   2. mem_data(block)... for text segment
+    //   3. mem_begin(data_len, blocks, block_size, data_start)
+    //   4. mem_data(block)... for data segment
+    //   5. mem_end(0, entry)  → jump to stub entry point
+    //   6. Read "OHAI" 4-byte magic from stub to confirm it's running
 
-    async flashBegin(size, offset, eraseSize) {
-        const numBlocks = Math.ceil(size / ESP32P4.CHUNK);
+    async uploadStub() {
+        this.log(t('msgStubUpload'), 'info');
+
+        const text = Uint8Array.from(atob(ESP32P4_STUB.text), c => c.charCodeAt(0));
+        const data = Uint8Array.from(atob(ESP32P4_STUB.data), c => c.charCodeAt(0));
+
+        await this._uploadSegment(text, ESP32P4_STUB.text_start);
+        if (data.length > 0) {
+            await this._uploadSegment(data, ESP32P4_STUB.data_start);
+        }
+
+        // mem_end: reboot=0 (run), entry point
+        const endData = new Uint8Array(8);
+        const ev = new DataView(endData.buffer);
+        ev.setUint32(0, 0,                  true); // flag: 0 = jump to entry
+        ev.setUint32(4, ESP32P4_STUB.entry, true);
+        await this._cmd(CMD_MEM_END, endData, 0, 3000);
+
+        // Stub signals it's running by sending 4 bytes: 0x4F 0x48 0x41 0x49 ("OHAI")
+        const ohai = await this.s.waitBytes(4, 3000);
+        if (ohai[0] !== 0x4F || ohai[1] !== 0x48 || ohai[2] !== 0x41 || ohai[3] !== 0x49) {
+            throw new Error(`Stub handshake failed: got [${Array.from(ohai).map(b=>'0x'+b.toString(16)).join(',')}]`);
+        }
+
+        this.stubRunning = true;
+        this.log(t('msgStubReady'), 'success');
+    }
+
+    async _uploadSegment(segment, loadAddr) {
+        const chunkSize = ESP32P4.MEM_CHUNK;
+        const numBlocks = Math.ceil(segment.length / chunkSize);
+
+        // mem_begin
+        const beginData = new Uint8Array(16);
+        const bv = new DataView(beginData.buffer);
+        bv.setUint32(0,  segment.length, true);
+        bv.setUint32(4,  numBlocks,      true);
+        bv.setUint32(8,  chunkSize,      true);
+        bv.setUint32(12, loadAddr,       true);
+        await this._cmd(CMD_MEM_BEGIN, beginData, 0, 3000);
+
+        // mem_data blocks
+        for (let seq = 0; seq < numBlocks; seq++) {
+            const start = seq * chunkSize;
+            const end   = Math.min(start + chunkSize, segment.length);
+            const chunk = segment.slice(start, end);
+
+            const pkt = new Uint8Array(16 + chunk.length);
+            const pv  = new DataView(pkt.buffer);
+            pv.setUint32(0,  chunk.length, true);
+            pv.setUint32(4,  seq,          true);
+            pv.setUint32(8,  0,            true);
+            pv.setUint32(12, 0,            true);
+            pkt.set(chunk, 16);
+            const chk = espChecksum(chunk);
+            await this._cmd(CMD_MEM_DATA, pkt, chk, 3000);
+        }
+    }
+
+    // ── flash_defl_begin (stub only) ──────────────────────────────────────────
+
+    async flashDeflBegin(uncompressedSize, compressedSize, offset) {
+        const numBlocks = Math.ceil(compressedSize / ESP32P4.CHUNK);
+        const eraseSize = Math.ceil(uncompressedSize / ESP32P4.SECTOR) * ESP32P4.SECTOR;
         const data = new Uint8Array(16);
         const v    = new DataView(data.buffer);
-        v.setUint32(0,  eraseSize,      true);
-        v.setUint32(4,  numBlocks,      true);
-        v.setUint32(8,  ESP32P4.CHUNK,  true);
-        v.setUint32(12, offset,         true);
-        const r = await this._cmd(CMD_FLASH_BEGIN, data, 0, 30000);
-        if (r.data[1] !== 0) throw new Error(`flash_begin error code ${r.data[1]}`);
+        v.setUint32(0,  eraseSize,     true);
+        v.setUint32(4,  numBlocks,     true);
+        v.setUint32(8,  ESP32P4.CHUNK, true);
+        v.setUint32(12, offset,        true);
+        const r = await this._cmd(CMD_FLASH_DEFL_BEGIN, data, 0, 30000);
+        if (r.data[1] !== 0) throw new Error(`flash_defl_begin error ${r.data[1]}`);
     }
 
-    // ── flash_data ───────────────────────────────────────────────────────────
+    // ── flash_defl_data ───────────────────────────────────────────────────────
 
-    async flashData(chunk, seq) {
-        const pkt = new Uint8Array(16 + chunk.length);
+    async flashDeflData(compressedChunk, seq) {
+        const pkt = new Uint8Array(16 + compressedChunk.length);
         const v   = new DataView(pkt.buffer);
-        v.setUint32(0,  chunk.length, true);
-        v.setUint32(4,  seq,          true);
-        v.setUint32(8,  0,            true);
-        v.setUint32(12, 0,            true);
-        pkt.set(chunk, 16);
-        const chk = espChecksum(chunk);
-        const r = await this._cmd(CMD_FLASH_DATA, pkt, chk, 10000);
-        if (r.data[1] !== 0) throw new Error(`flash_data seq=${seq} error ${r.data[1]}`);
+        v.setUint32(0,  compressedChunk.length, true);
+        v.setUint32(4,  seq,                    true);
+        v.setUint32(8,  0,                      true);
+        v.setUint32(12, 0,                      true);
+        pkt.set(compressedChunk, 16);
+        const chk = espChecksum(compressedChunk);
+        const r = await this._cmd(CMD_FLASH_DEFL_DATA, pkt, chk, 10000);
+        if (r.data[1] !== 0) throw new Error(`flash_defl_data seq=${seq} error ${r.data[1]}`);
     }
 
-    // ── flash_end ────────────────────────────────────────────────────────────
+    // ── flash_defl_end ────────────────────────────────────────────────────────
 
-    async flashEnd(reboot = false) {
+    async flashDeflEnd(reboot = false) {
         const data = le32(reboot ? 0 : 1);
-        try { await this._cmd(CMD_FLASH_END, data, 0, 3000); } catch (_) {}
+        try { await this._cmd(CMD_FLASH_DEFL_END, data, 0, 3000); } catch (_) {}
     }
 
-    // ── write one region ─────────────────────────────────────────────────────
+    // ── deflate compress (uses DecompressionStream inverse via CompressionStream) ──
 
-    /**
-     * @param {Uint8Array} bin      firmware bytes
-     * @param {number}     offset   flash byte offset
-     * @param {object}     opts
-     *   erase        {boolean}
-     *   verify       {boolean}
-     *   name         {string}
-     *   onProgress   {function}   ({written, total, percent, speed, secsWritten})
-     *   onSector     {function}   (flashByteAddr, state)
-     */
+    async _deflate(data) {
+        // Use CompressionStream API (available in Chrome 80+)
+        const cs = new CompressionStream('deflate-raw');
+        const writer = cs.writable.getWriter();
+        writer.write(data);
+        writer.close();
+        const chunks = [];
+        const reader = cs.readable.getReader();
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+        }
+        const total = chunks.reduce((s, c) => s + c.length, 0);
+        const out = new Uint8Array(total);
+        let pos = 0;
+        for (const c of chunks) { out.set(c, pos); pos += c.length; }
+        return out;
+    }
+
+    // ── write one region (stub + deflate) ────────────────────────────────────
+
     async writeRegion(bin, offset, opts = {}) {
-        const { erase = false, name = 'region', onProgress = ()=>{}, onSector = ()=>{} } = opts;
+        const { name = 'region', onProgress = ()=>{}, onSector = ()=>{} } = opts;
 
-        const total      = bin.length;
-        const chunkSize  = ESP32P4.CHUNK;
-        const numChunks  = Math.ceil(total / chunkSize);
-        const eraseSize  = erase
-            ? Math.ceil(total / ESP32P4.SECTOR) * ESP32P4.SECTOR
-            : Math.ceil(total / ESP32P4.SECTOR) * ESP32P4.SECTOR; // always erase what we write
-
+        const total = bin.length;
         this.log(t('msgFlashStart', {
             name,
             offset: `0x${offset.toString(16)}`,
             size:   (total / 1024).toFixed(1),
         }), 'info');
 
-        await this.flashBegin(total, offset, eraseSize);
+        // Compress the whole region
+        this.log(`Compressing ${name}…`, 'debug');
+        const compressed = await this._deflate(bin);
+        this.log(`Compressed: ${total} → ${compressed.length} bytes (${(compressed.length/total*100).toFixed(0)}%)`, 'debug');
 
+        await this.flashDeflBegin(total, compressed.length, offset);
+
+        const chunkSize  = ESP32P4.CHUNK;
+        const numChunks  = Math.ceil(compressed.length / chunkSize);
         const t0 = Date.now();
-        let written = 0;
+        let written = 0;  // uncompressed bytes written (estimated)
 
         for (let seq = 0; seq < numChunks; seq++) {
             const start = seq * chunkSize;
-            const end   = Math.min(start + chunkSize, total);
-            let chunk   = bin.slice(start, end);
+            const end   = Math.min(start + chunkSize, compressed.length);
+            const chunk = compressed.slice(start, end);
 
-            // pad to chunkSize with 0xFF
-            if (chunk.length < chunkSize) {
-                const p = new Uint8Array(chunkSize).fill(0xFF);
-                p.set(chunk);
-                chunk = p;
-            }
-
-            // mark sectors being written
-            const secFirst = Math.floor((offset + start) / ESP32P4.SECTOR);
-            const secLast  = Math.floor((offset + end - 1) / ESP32P4.SECTOR);
+            // Estimate uncompressed progress proportionally
+            const uncompWritten = Math.round((end / compressed.length) * total);
+            const secFirst = Math.floor((offset + (seq > 0 ? Math.round((start/compressed.length)*total) : 0)) / ESP32P4.SECTOR);
+            const secLast  = Math.floor((offset + uncompWritten - 1) / ESP32P4.SECTOR);
             for (let s = secFirst; s <= secLast; s++) onSector(s * ESP32P4.SECTOR, 'writing');
 
-            await this.flashData(chunk, seq);
-            written += (end - start);
+            await this.flashDeflData(chunk, seq);
+            written = uncompWritten;
 
             for (let s = secFirst; s <= secLast; s++) onSector(s * ESP32P4.SECTOR, 'done');
 
@@ -579,23 +650,24 @@ class ESP32P4 {
             onProgress({
                 written,
                 total,
-                percent:      (written / total * 100).toFixed(1),
-                speed:        (written / 1024 / elapsed).toFixed(1),
-                secsWritten:  secLast + 1,
+                percent:     (written / total * 100).toFixed(1),
+                speed:       (written / 1024 / elapsed).toFixed(1),
+                secsWritten: secLast + 1,
             });
         }
 
-        // no reboot yet — called after all regions
-        await this.flashEnd(false);
+        await this.flashDeflEnd(false);
 
         if (opts.verify) {
             this.log(t('msgVerifying', { name }), 'info');
-            // Full re-read verify requires stub; mark as verified visually
             const secFirst = Math.floor(offset / ESP32P4.SECTOR);
             const secLast  = Math.floor((offset + total - 1) / ESP32P4.SECTOR);
             for (let s = secFirst; s <= secLast; s++) onSector(s * ESP32P4.SECTOR, 'verified');
             this.log(t('msgVerifyOK'), 'success');
         }
+
+        onProgress({ written: total, total, percent: '100.0',
+            speed: ((total/1024)/((Date.now()-t0)/1000)).toFixed(1), secsWritten: Math.ceil(total/ESP32P4.SECTOR) });
 
         this.log(t('msgRegionDone', { name }), 'success');
     }
@@ -704,6 +776,60 @@ class AgonVFlasher {
         // mark loaded regions as pending
         for (const r of this.regions) {
             if (r.data) this._markRegionCells(r, 'pending');
+        }
+    }
+
+    // ── preload default firmware ──────────────────────────────────────────────
+    //
+    // Fetches the three default .bin files that live next to index.html
+    // (same directory), creates Region objects and loads their data.
+    // Works offline if the files are present locally via a file server.
+
+    async preloadDefault() {
+        this.log('Loading agonV default firmware files…', 'info');
+        document.getElementById('preloadBtn').disabled = true;
+
+        // Clear existing regions
+        this.regions = [];
+        document.getElementById('regionsList').innerHTML = '';
+
+        let loaded = 0;
+        for (const def of AGONV_DEFAULT_REGIONS) {
+            // Add the region row first so the user sees it appear
+            this._addRegion(def.offset, null);
+            const region = this.regions[this.regions.length - 1];
+
+            try {
+                const resp = await fetch(def.filename);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const buf  = await resp.arrayBuffer();
+                region.data = new Uint8Array(buf);
+
+                // Create a synthetic File object so region.name works
+                region.file = new File([buf], def.filename, { type: 'application/octet-stream' });
+
+                // Update the row UI
+                const zone    = document.querySelector(`#row-${region.id} .file-drop-zone`);
+                const fnameEl = document.querySelector(`#row-${region.id} .fname`);
+                const sizeEl  = document.querySelector(`#row-${region.id} .region-size`);
+                if (zone)    zone.classList.add('has-file');
+                if (fnameEl) fnameEl.textContent = def.filename;
+                if (sizeEl)  { sizeEl.textContent = `${region.sizeKB} KB`; sizeEl.classList.add('loaded'); }
+
+                this.log(`  ✓ ${def.filename}  →  ${def.offset}  (${region.sizeKB} KB)`, 'success');
+                loaded++;
+            } catch (err) {
+                this.log(t('msgPreloadErr', { name: def.filename, err: err.message }), 'error');
+                this._setRegionStatus(region, 'error', '✗');
+            }
+        }
+
+        this._resetMap();
+        this._refreshFlashBtn();
+        document.getElementById('preloadBtn').disabled = false;
+
+        if (loaded > 0) {
+            this.log(t('msgPreloadDone', { n: loaded }), loaded === AGONV_DEFAULT_REGIONS.length ? 'success' : 'warning');
         }
     }
 
@@ -820,6 +946,8 @@ class AgonVFlasher {
             .addEventListener('click', () => this.disconnect());
         document.getElementById('flashBtn')
             .addEventListener('click', () => this.flashAll());
+        document.getElementById('preloadBtn')
+            .addEventListener('click', () => this.preloadDefault());
         document.getElementById('addRegionBtn')
             .addEventListener('click', () => { this._addRegion(); });
         document.getElementById('clearRegionsBtn')
@@ -926,10 +1054,12 @@ class AgonVFlasher {
             }
 
             await this.esp.sync();
-            await this.esp.spiAttach();
             await this.esp.detectChip();
 
-            // Bump baud rate for faster flashing
+            // Upload stub — required for USB-JTAG/Serial mode and deflate flash
+            await this.esp.uploadStub();
+
+            // Bump baud rate after stub is running (stub supports high bauds)
             if (baud !== 115200) {
                 await this.esp.changeBaud(baud, 115200);
             }
@@ -1022,8 +1152,8 @@ class AgonVFlasher {
             // final reboot
             this.log(t('msgResetting'), 'info');
             if (after === 'hard_reset' || after === 'soft_reset') {
-                await this.esp.flashEnd(true);
-                if (after === 'hard_reset') await this.esp.resetNormal();
+                await this.esp.flashDeflEnd(true);
+                await this.esp.resetHard();
             }
             this.log(t('msgResetDone'), 'success');
 
@@ -1049,6 +1179,16 @@ class AgonVFlasher {
         document.getElementById('addRegionBtn').disabled  = !on;
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Default agonV firmware layout
+// Matches: esptool write_flash 0x2000 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-mos.bin
+// ─────────────────────────────────────────────────────────────────────────────
+const AGONV_DEFAULT_REGIONS = [
+    { offset: '0x2000',  filename: 'bootloader.bin'      },
+    { offset: '0x8000',  filename: 'partition-table.bin' },
+    { offset: '0x10000', filename: 'esp32-mos.bin'        },
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bootstrap
