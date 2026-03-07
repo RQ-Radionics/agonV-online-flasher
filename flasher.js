@@ -200,11 +200,7 @@ class AgonVFlasher {
             // Pick serial port
             this.device = await navigator.serial.requestPort();
 
-            // Show boot instructions — user must manually enter bootloader
-            this.log(t('msgBootInstructions'), 'info');
-            await this._showBootModal();
-
-            // Build esptool-js Transport + ESPLoader
+            // Build Transport + ESPLoader first (does not open port yet)
             this.transport = new Transport(this.device);
             this.loader = new ESPLoader({
                 transport: this.transport,
@@ -212,7 +208,13 @@ class AgonVFlasher {
                 terminal:  makeTerminal((m, tp) => this.log(m, tp)),
             });
 
-            // Connect with no_reset — we're already in bootloader
+            // Show boot instructions — user must manually enter bootloader
+            // The modal blocks until user clicks Done.
+            this.log(t('msgBootInstructions'), 'info');
+            await this._showBootModal();
+
+            // Connect immediately — chip is in bootloader right now.
+            // 'no_reset' = don't touch RTS/DTR, just sync.
             const chip = await this.loader.main('no_reset');
             this.log(t('msgConnected', { chip }), 'success');
             this.setStatus('connected', 'connected');
