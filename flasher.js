@@ -197,21 +197,26 @@ class AgonVFlasher {
         document.getElementById('connectBtn').disabled = true;
 
         try {
-            // 1. Pick port first
+            // 1. Pick port
             this.device = await navigator.serial.requestPort();
 
-            // 2. Build loader (does not open port yet)
+            // 2. Open port explicitly (esp-web-tools pattern)
+            await this.device.open({ baudRate: 115200, bufferSize: 8192 });
+
+            // 3. Build Transport + ESPLoader with already-open port.
+            // Patch transport.connect() so ESPLoader doesn't try to open() again.
             this.transport = new Transport(this.device);
+            this.transport.connect = async () => { this.transport.baudrate = 115200; };
             this.loader = new ESPLoader({
                 transport: this.transport,
                 baudrate:  115200,
                 terminal:  makeTerminal((m, tp) => this.log(m, tp)),
             });
 
-            // 3. Show instructions — user puts chip in bootloader, clicks Done
+            // 4. Show instructions — user puts chip in bootloader, clicks Done
             await this._showBootModal();
 
-            // 4. Connect immediately after Done click
+            // 5. Sync immediately
             const chip = await this.loader.main('no_reset');
             this.log(t('msgConnected', { chip }), 'success');
             this.setStatus('connected', 'connected');
