@@ -5,13 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>agonV Flasher</title>
     <style>
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 900px;
+            max-width: 960px;
             margin: 0 auto;
             padding: 20px;
             background: #1a1a2e;
@@ -21,68 +19,105 @@
 
         header {
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 28px;
         }
-
         header h1 {
             color: #00d4ff;
             margin: 0 0 6px 0;
             font-size: 2rem;
-            letter-spacing: 2px;
+            letter-spacing: 3px;
         }
-
-        header h1 span {
-            color: #4ecca3;
-        }
-
+        header h1 span { color: #4ecca3; }
         header p {
-            color: #888;
+            color: #555;
             margin: 0;
-            font-size: 13px;
-            letter-spacing: 1px;
+            font-size: 12px;
+            letter-spacing: 1.5px;
             text-transform: uppercase;
         }
 
         .panel {
             background: #16213e;
             border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 20px;
+            padding: 18px 20px;
+            margin-bottom: 18px;
             border: 1px solid #0f3460;
         }
 
         .panel-title {
             color: #00d4ff;
-            margin: 0 0 16px 0;
-            font-size: 14px;
+            margin: 0 0 14px 0;
+            font-size: 12px;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 1.5px;
             display: flex;
             align-items: center;
             gap: 8px;
         }
-
         .panel-title::before {
             content: '';
             display: inline-block;
             width: 3px;
-            height: 14px;
+            height: 13px;
             background: #00d4ff;
             border-radius: 2px;
+            flex-shrink: 0;
         }
 
-        /* ── Browser warning ── */
+        /* ── browser warning ── */
         .browser-warning {
             background: #e94560;
-            color: white;
-            padding: 14px 18px;
+            color: #fff;
+            padding: 12px 18px;
             border-radius: 8px;
-            margin-bottom: 20px;
-            display: none;
+            margin-bottom: 18px;
             font-weight: 600;
+            display: none;
         }
 
-        /* ── Connection panel ── */
+        /* ── buttons ── */
+        button {
+            background: #0f3460;
+            color: #00d4ff;
+            border: 1px solid #00d4ff;
+            padding: 9px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        button:hover:not(:disabled) { background: #00d4ff; color: #1a1a2e; }
+        button:disabled { opacity: 0.3; cursor: not-allowed; }
+
+        button.danger  { border-color: #e94560; color: #e94560; }
+        button.danger:hover:not(:disabled)  { background: #e94560; color: #fff; }
+
+        button.go      { border-color: #4ecca3; color: #4ecca3; }
+        button.go:hover:not(:disabled)      { background: #4ecca3; color: #1a1a2e; }
+
+        button.sm { padding: 5px 12px; font-size: 11px; }
+
+        /* ── status badge ── */
+        .status-badge {
+            margin-left: auto;
+            padding: 7px 16px;
+            border-radius: 20px;
+            font-weight: 700;
+            font-size: 11px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        .status-badge.disconnected { background: #e94560; color: #fff; }
+        .status-badge.connected    { background: #4ecca3; color: #1a1a2e; }
+        .status-badge.flashing     { background: #ffc107; color: #1a1a2e; }
+        .status-badge.done         { background: #00d4ff; color: #1a1a2e; }
+        .status-badge.error        { background: #e94560; color: #fff; }
+
+        /* ── connection row ── */
         .connection-row {
             display: flex;
             gap: 10px;
@@ -90,239 +125,212 @@
             align-items: center;
         }
 
-        button {
-            background: #0f3460;
-            color: #00d4ff;
-            border: 1px solid #00d4ff;
-            padding: 10px 22px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 13px;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            transition: all 0.2s;
-        }
-
-        button:hover:not(:disabled) {
-            background: #00d4ff;
-            color: #1a1a2e;
-        }
-
-        button:disabled {
-            opacity: 0.35;
-            cursor: not-allowed;
-        }
-
-        button.danger {
-            border-color: #e94560;
-            color: #e94560;
-        }
-
-        button.danger:hover:not(:disabled) {
-            background: #e94560;
-            color: #fff;
-        }
-
-        button.accent {
-            border-color: #4ecca3;
-            color: #4ecca3;
-        }
-
-        button.accent:hover:not(:disabled) {
-            background: #4ecca3;
-            color: #1a1a2e;
-        }
-
-        .status-badge {
-            margin-left: auto;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-weight: 700;
-            font-size: 12px;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-        }
-
-        .status-badge.disconnected { background: #e94560; color: #fff; }
-        .status-badge.connected    { background: #4ecca3; color: #1a1a2e; }
-        .status-badge.flashing     { background: #ffc107; color: #1a1a2e; }
-        .status-badge.done         { background: #00d4ff; color: #1a1a2e; }
-        .status-badge.error        { background: #e94560; color: #fff; }
-
-        /* ── Firmware selector ── */
-        .firmware-row {
+        /* ── flash config bar ── */
+        .flash-config {
             display: flex;
             gap: 10px;
-            align-items: center;
             flex-wrap: wrap;
+            align-items: flex-end;
+            margin-bottom: 16px;
         }
-
-        .file-label {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            background: #0f3460;
-            border: 1px solid #00d4ff44;
-            padding: 10px 16px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 13px;
-            color: #aaa;
-            transition: border-color 0.2s;
-            flex: 1;
-            min-width: 200px;
-        }
-
-        .file-label:hover {
-            border-color: #00d4ff;
-            color: #eee;
-        }
-
-        .file-label .file-icon {
-            font-size: 18px;
-            flex-shrink: 0;
-        }
-
-        .file-label .file-name {
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        input[type="file"] {
-            display: none;
-        }
-
-        /* ── Config options ── */
-        .config-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 14px;
-        }
-
-        .config-field {
+        .field {
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: 5px;
         }
-
-        .config-field label {
-            font-size: 11px;
-            color: #888;
+        .field label {
+            font-size: 10px;
+            color: #555;
             text-transform: uppercase;
             letter-spacing: 0.8px;
         }
-
-        .config-field input[type="text"],
-        .config-field select {
+        .field select, .field input[type="text"] {
             background: #0a0a15;
             border: 1px solid #0f3460;
             color: #eee;
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-size: 13px;
-            font-family: 'Consolas', 'Monaco', monospace;
+            padding: 7px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-family: 'Consolas', monospace;
             transition: border-color 0.2s;
         }
+        .field select:focus,
+        .field input[type="text"]:focus { outline: none; border-color: #00d4ff44; }
+        .field select option { background: #1a1a2e; }
 
-        .config-field input[type="text"]:focus,
-        .config-field select:focus {
-            outline: none;
-            border-color: #00d4ff;
-        }
-
-        .config-field select option {
-            background: #1a1a2e;
-        }
-
-        .config-checks {
+        .check-row {
             display: flex;
-            gap: 20px;
+            gap: 18px;
             flex-wrap: wrap;
-            margin-top: 4px;
+            align-items: center;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #0f3460;
         }
-
         .check-label {
             display: flex;
             align-items: center;
-            gap: 8px;
-            font-size: 13px;
-            color: #ccc;
+            gap: 7px;
+            font-size: 12px;
+            color: #aaa;
             cursor: pointer;
         }
-
         .check-label input[type="checkbox"] {
             accent-color: #00d4ff;
-            width: 15px;
-            height: 15px;
+            width: 14px; height: 14px;
             cursor: pointer;
         }
 
-        /* ── Progress ── */
-        .progress-container {
-            margin-top: 16px;
+        /* ── regions table ── */
+        .regions-header {
+            display: grid;
+            grid-template-columns: 110px 1fr 90px 90px;
+            gap: 8px;
+            padding: 0 6px 6px 6px;
+            font-size: 10px;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            border-bottom: 1px solid #0f3460;
+            margin-bottom: 8px;
         }
 
+        .region-row {
+            display: grid;
+            grid-template-columns: 110px 1fr 90px 90px;
+            gap: 8px;
+            align-items: center;
+            padding: 8px 6px;
+            border-radius: 6px;
+            transition: background 0.15s;
+        }
+        .region-row:hover { background: #0f346020; }
+
+        .region-row input[type="text"] {
+            background: #0a0a15;
+            border: 1px solid #0f3460;
+            color: #00d4ff;
+            padding: 6px 10px;
+            border-radius: 5px;
+            font-family: 'Consolas', monospace;
+            font-size: 13px;
+            width: 100%;
+            transition: border-color 0.2s;
+        }
+        .region-row input[type="text"]:focus { outline: none; border-color: #00d4ff; }
+
+        .file-drop-zone {
+            background: #0a0a15;
+            border: 1px dashed #0f3460;
+            border-radius: 5px;
+            padding: 7px 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #555;
+            transition: all 0.2s;
+            min-width: 0;
+        }
+        .file-drop-zone:hover,
+        .file-drop-zone.drag-over { border-color: #00d4ff44; color: #aaa; }
+        .file-drop-zone.has-file  { border-color: #4ecca3; color: #4ecca3; border-style: solid; }
+        .file-drop-zone .fname {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex: 1;
+        }
+        .file-drop-zone input[type="file"] { display: none; }
+
+        .region-size {
+            font-family: 'Consolas', monospace;
+            font-size: 11px;
+            color: #555;
+            text-align: right;
+        }
+        .region-size.loaded { color: #4ecca3; }
+
+        .region-status {
+            font-size: 11px;
+            font-weight: 700;
+            text-align: center;
+            padding: 3px 8px;
+            border-radius: 10px;
+            letter-spacing: 0.5px;
+        }
+        .region-status.pending  { color: #555; }
+        .region-status.erasing  { color: #ffc107; }
+        .region-status.writing  { color: #ffc107; }
+        .region-status.done     { color: #4ecca3; }
+        .region-status.error    { color: #e94560; }
+
+        .add-region-row {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #0f346030;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        /* ── progress ── */
         .progress-bar {
             width: 100%;
-            height: 28px;
+            height: 26px;
             background: #0a0a15;
-            border-radius: 14px;
+            border-radius: 13px;
             overflow: hidden;
             position: relative;
             border: 1px solid #0f3460;
+            margin-top: 14px;
         }
-
         .progress-fill {
             height: 100%;
             background: linear-gradient(90deg, #00d4ff, #4ecca3);
             transition: width 0.3s ease;
             width: 0%;
         }
-
         .progress-text {
             position: absolute;
-            top: 50%;
-            left: 50%;
+            top: 50%; left: 50%;
             transform: translate(-50%, -50%);
             font-weight: 700;
-            font-size: 12px;
-            color: white;
+            font-size: 11px;
+            color: #fff;
             text-shadow: 0 1px 3px rgba(0,0,0,0.8);
             white-space: nowrap;
         }
 
-        /* ── Stats ── */
+        /* ── stats ── */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-            gap: 12px;
-            margin-top: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+            gap: 10px;
+            margin-top: 12px;
         }
-
         .stat-box {
             background: #0f3460;
-            padding: 14px;
+            padding: 12px;
             border-radius: 8px;
             text-align: center;
         }
-
         .stat-value {
-            font-size: 22px;
+            font-size: 18px;
             font-weight: 700;
             color: #00d4ff;
-            font-family: 'Consolas', 'Monaco', monospace;
+            font-family: 'Consolas', monospace;
         }
-
         .stat-label {
-            font-size: 11px;
-            color: #888;
-            margin-top: 4px;
+            font-size: 10px;
+            color: #555;
+            margin-top: 3px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
 
-        /* ── Sector map ── */
+        /* ── sector map ── */
         #sectorMap {
             display: grid;
             grid-template-columns: repeat(64, 1fr);
@@ -332,225 +340,235 @@
             border-radius: 6px;
             margin-top: 10px;
         }
-
         .sector {
             aspect-ratio: 1;
-            background: #0f3460;
             border-radius: 1px;
-            transition: background 0.15s;
-            cursor: default;
+            transition: background 0.12s;
         }
-
-        .sector.pending   { background: #0f3460; }
-        .sector.writing   { background: #ffc107; }
-        .sector.written   { background: #4ecca3; }
-        .sector.verified  { background: #00d4ff; }
-        .sector.error     { background: #e94560; }
+        .sector.empty    { background: #0f3460; }
+        .sector.pending  { background: #1a3a6a; }
+        .sector.erasing  { background: #ff9800; }
+        .sector.writing  { background: #ffc107; }
+        .sector.done     { background: #4ecca3; }
+        .sector.verified { background: #00d4ff; }
+        .sector.error    { background: #e94560; }
 
         .map-legend {
             display: flex;
-            gap: 16px;
+            gap: 14px;
             flex-wrap: wrap;
-            margin-top: 10px;
+            margin-top: 8px;
             font-size: 11px;
-            color: #888;
+            color: #555;
         }
+        .legend-item { display: flex; align-items: center; gap: 5px; }
+        .legend-dot  { width: 10px; height: 10px; border-radius: 2px; }
 
-        .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-
-        .legend-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 2px;
-        }
-
-        /* ── Log ── */
+        /* ── log ── */
         #log {
             background: #0a0a15;
             border: 1px solid #0f3460;
             border-radius: 6px;
-            padding: 14px;
-            height: 260px;
+            padding: 12px 14px;
+            height: 240px;
             overflow-y: auto;
             font-family: 'Consolas', 'Monaco', monospace;
             font-size: 12px;
             line-height: 1.6;
         }
-
-        #log:empty::before {
-            content: 'agonV Flasher ready.';
-            color: #444;
-        }
-
         .log-entry { margin: 1px 0; }
         .log-info    { color: #00d4ff; }
         .log-success { color: #4ecca3; }
         .log-error   { color: #e94560; }
         .log-warning { color: #ffc107; }
-        .log-debug   { color: #666; }
+        .log-debug   { color: #333; }
 
-        /* ── Footer ── */
         footer {
             text-align: center;
-            color: #333;
+            color: #2a2a4a;
             font-size: 11px;
-            margin-top: 10px;
+            margin-top: 8px;
             letter-spacing: 0.5px;
         }
 
-        footer a {
-            color: #0f3460;
-            text-decoration: none;
-        }
-
-        footer a:hover {
-            color: #00d4ff;
-        }
-
-        /* ── Scrollbar ── */
-        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar { width: 5px; }
         ::-webkit-scrollbar-track { background: #0a0a15; }
         ::-webkit-scrollbar-thumb { background: #0f3460; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #00d4ff44; }
+        ::-webkit-scrollbar-thumb:hover { background: #1a3a6a; }
     </style>
 </head>
 <body>
 
-    <header>
-        <h1>agon<span>V</span> Flasher</h1>
-        <p>ESP32-P4 &mdash; Olimex &mdash; Web Serial Flasher</p>
-    </header>
+<header>
+    <h1>agon<span>V</span> Flasher</h1>
+    <p>ESP32-P4 &nbsp;&middot;&nbsp; Olimex &nbsp;&middot;&nbsp; Web Serial</p>
+</header>
 
-    <div class="browser-warning" id="browserWarning" data-i18n="browserWarning">
-        Your browser does not support Web Serial API. Please use Chrome or Edge.
+<div class="browser-warning" id="browserWarning" data-i18n="browserWarning">
+    Your browser does not support Web Serial API. Please use Chrome or Edge.
+</div>
+
+<!-- ── 1. Connection ── -->
+<div class="panel">
+    <h2 class="panel-title" data-i18n="panelConnection">Connection</h2>
+    <div class="connection-row">
+        <button id="connectBtn"    data-i18n="connect">Connect Device</button>
+        <button id="disconnectBtn" class="danger" disabled data-i18n="disconnect">Disconnect</button>
+        <div class="status-badge disconnected" id="statusBadge" data-i18n="disconnected">Disconnected</div>
     </div>
+</div>
 
-    <!-- Connection panel -->
-    <div class="panel">
-        <h2 class="panel-title" data-i18n="panelConnection">Connection</h2>
-        <div class="connection-row">
-            <button id="connectBtn" data-i18n="connect">Connect Device</button>
-            <button id="disconnectBtn" class="danger" disabled data-i18n="disconnect">Disconnect</button>
-            <div class="status-badge disconnected" id="statusBadge" data-i18n="disconnected">Disconnected</div>
-        </div>
-    </div>
+<!-- ── 2. Flash settings + regions ── -->
+<div class="panel">
+    <h2 class="panel-title" data-i18n="panelFlash">Flash Settings</h2>
 
-    <!-- Firmware panel -->
-    <div class="panel">
-        <h2 class="panel-title" data-i18n="panelFirmware">Firmware</h2>
-        <div class="firmware-row">
-            <label class="file-label" for="firmwareFile">
-                <span class="file-icon">&#128190;</span>
-                <span class="file-name" id="fileNameDisplay" data-i18n="noFileSelected">No file selected...</span>
-            </label>
-            <input type="file" id="firmwareFile" accept=".bin">
-            <button id="flashBtn" class="accent" disabled data-i18n="flash">Flash Firmware</button>
+    <!-- global flash params -->
+    <div class="flash-config">
+        <div class="field">
+            <label data-i18n="cfgBaud">Baud Rate</label>
+            <select id="cfgBaud">
+                <option value="115200">115200</option>
+                <option value="230400">230400</option>
+                <option value="460800" selected>460800</option>
+                <option value="921600">921600</option>
+            </select>
         </div>
-
-        <div class="progress-container">
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill"></div>
-                <div class="progress-text" id="progressText">0%</div>
-            </div>
+        <div class="field">
+            <label data-i18n="cfgFlashMode">Flash Mode</label>
+            <select id="cfgFlashMode">
+                <option value="dio" selected>DIO</option>
+                <option value="qio">QIO</option>
+                <option value="dout">DOUT</option>
+                <option value="qout">QOUT</option>
+            </select>
         </div>
-
-        <div class="stats-grid">
-            <div class="stat-box">
-                <div class="stat-value" id="statWritten">0</div>
-                <div class="stat-label" data-i18n="statWritten">KB Written</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-value" id="statTotal">0</div>
-                <div class="stat-label" data-i18n="statTotal">KB Total</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-value" id="statSectors">0</div>
-                <div class="stat-label" data-i18n="statSectors">Sectors Done</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-value" id="statErrors">0</div>
-                <div class="stat-label" data-i18n="statErrors">Errors</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-value" id="statSpeed">—</div>
-                <div class="stat-label" data-i18n="statSpeed">KB/s</div>
-            </div>
+        <div class="field">
+            <label data-i18n="cfgFlashSize">Flash Size</label>
+            <select id="cfgFlashSize">
+                <option value="4MB">4MB</option>
+                <option value="8MB">8MB</option>
+                <option value="16MB" selected>16MB</option>
+                <option value="32MB">32MB</option>
+            </select>
         </div>
-    </div>
-
-    <!-- Config panel -->
-    <div class="panel">
-        <h2 class="panel-title" data-i18n="panelConfig">Configuration</h2>
-        <div class="config-grid">
-            <div class="config-field">
-                <label data-i18n="cfgOffset">Flash Offset</label>
-                <input type="text" id="cfgOffset" value="0x0" placeholder="0x0" maxlength="10">
-            </div>
-            <div class="config-field">
-                <label data-i18n="cfgBaud">Baud Rate</label>
-                <select id="cfgBaud">
-                    <option value="115200">115200</option>
-                    <option value="230400">230400</option>
-                    <option value="460800" selected>460800</option>
-                    <option value="921600">921600</option>
-                </select>
-            </div>
+        <div class="field">
+            <label data-i18n="cfgFlashFreq">Flash Freq</label>
+            <select id="cfgFlashFreq">
+                <option value="40m">40 MHz</option>
+                <option value="80m" selected>80 MHz</option>
+                <option value="120m">120 MHz</option>
+            </select>
         </div>
-        <div class="config-checks" style="margin-top: 14px;">
-            <label class="check-label">
-                <input type="checkbox" id="cfgErase">
-                <span data-i18n="cfgErase">Erase flash before writing</span>
-            </label>
-            <label class="check-label">
-                <input type="checkbox" id="cfgVerify" checked>
-                <span data-i18n="cfgVerify">Verify after writing</span>
-            </label>
+        <div class="field">
+            <label data-i18n="cfgBefore">Before Flash</label>
+            <select id="cfgBefore">
+                <option value="default_reset" selected>default_reset</option>
+                <option value="no_reset">no_reset</option>
+            </select>
+        </div>
+        <div class="field">
+            <label data-i18n="cfgAfter">After Flash</label>
+            <select id="cfgAfter">
+                <option value="hard_reset" selected>hard_reset</option>
+                <option value="soft_reset">soft_reset</option>
+                <option value="no_reset">no_reset</option>
+            </select>
         </div>
     </div>
 
-    <!-- Sector map panel -->
-    <div class="panel">
-        <h2 class="panel-title" data-i18n="panelMap">Flash Sector Map</h2>
-        <div id="sectorMap"></div>
-        <div class="map-legend">
-            <div class="legend-item">
-                <div class="legend-dot" style="background:#0f3460"></div>
-                <span data-i18n="legendPending">Pending</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-dot" style="background:#ffc107"></div>
-                <span data-i18n="legendWriting">Writing</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-dot" style="background:#4ecca3"></div>
-                <span data-i18n="legendWritten">Written</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-dot" style="background:#00d4ff"></div>
-                <span data-i18n="legendVerified">Verified</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-dot" style="background:#e94560"></div>
-                <span data-i18n="legendError">Error</span>
-            </div>
+    <div class="check-row">
+        <label class="check-label">
+            <input type="checkbox" id="cfgErase">
+            <span data-i18n="cfgErase">Erase all flash before writing</span>
+        </label>
+        <label class="check-label">
+            <input type="checkbox" id="cfgVerify" checked>
+            <span data-i18n="cfgVerify">Verify after writing</span>
+        </label>
+    </div>
+</div>
+
+<!-- ── 3. Regions ── -->
+<div class="panel">
+    <h2 class="panel-title" data-i18n="panelRegions">Flash Regions</h2>
+
+    <div class="regions-header">
+        <div data-i18n="colOffset">Offset</div>
+        <div data-i18n="colFile">File (.bin)</div>
+        <div style="text-align:right" data-i18n="colSize">Size</div>
+        <div style="text-align:center" data-i18n="colStatus">Status</div>
+    </div>
+
+    <div id="regionsList">
+        <!-- rows injected by JS -->
+    </div>
+
+    <div class="add-region-row">
+        <button class="sm" id="addRegionBtn" data-i18n="addRegion">+ Add Region</button>
+        <button class="sm danger" id="clearRegionsBtn" data-i18n="clearRegions">Clear All</button>
+    </div>
+</div>
+
+<!-- ── 4. Progress ── -->
+<div class="panel">
+    <h2 class="panel-title" data-i18n="panelProgress">Progress</h2>
+
+    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+        <button id="flashBtn" class="go" disabled data-i18n="flash">Flash All</button>
+        <span id="flashLabel" style="font-size:12px;color:#555;"></span>
+    </div>
+
+    <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+        <div class="progress-text" id="progressText">0%</div>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-box">
+            <div class="stat-value" id="statWritten">0</div>
+            <div class="stat-label" data-i18n="statWritten">KB Written</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-value" id="statTotal">0</div>
+            <div class="stat-label" data-i18n="statTotal">KB Total</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-value" id="statRegion">—</div>
+            <div class="stat-label" data-i18n="statRegion">Current Region</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-value" id="statSpeed">—</div>
+            <div class="stat-label" data-i18n="statSpeed">KB/s</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-value" id="statErrors">0</div>
+            <div class="stat-label" data-i18n="statErrors">Errors</div>
         </div>
     </div>
+</div>
 
-    <!-- Log panel -->
-    <div class="panel">
-        <h2 class="panel-title" data-i18n="panelLog">Log</h2>
-        <div id="log"></div>
+<!-- ── 5. Sector map ── -->
+<div class="panel">
+    <h2 class="panel-title" data-i18n="panelMap">Flash Memory Map (16 MB)</h2>
+    <div id="sectorMap"></div>
+    <div class="map-legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#0f3460"></div><span data-i18n="legendEmpty">Empty</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#1a3a6a"></div><span data-i18n="legendPending">Pending</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ffc107"></div><span data-i18n="legendWriting">Writing</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#4ecca3"></div><span data-i18n="legendDone">Written</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#00d4ff"></div><span data-i18n="legendVerified">Verified</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#e94560"></div><span data-i18n="legendError">Error</span></div>
     </div>
+</div>
 
-    <footer>
-        agonV Flasher &mdash; ESP32-P4 Olimex &mdash;
-        Web Serial API &mdash; Chrome / Edge required
-    </footer>
+<!-- ── 6. Log ── -->
+<div class="panel">
+    <h2 class="panel-title" data-i18n="panelLog">Log</h2>
+    <div id="log"></div>
+</div>
 
-    <script src="flasher.js"></script>
+<footer>agonV Flasher &nbsp;&middot;&nbsp; ESP32-P4 Olimex &nbsp;&middot;&nbsp; Requires Chrome / Edge</footer>
+
+<script src="flasher.js"></script>
 </body>
 </html>

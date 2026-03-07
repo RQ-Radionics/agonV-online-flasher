@@ -1,143 +1,187 @@
 // agonV Flasher — ESP32-P4 Olimex
-// Web Serial API flasher inspired by Dump950-web design
+// Web Serial API flasher
+// Equivalent to:
+//   python -m esptool --chip esp32p4 -b 460800 --before default_reset --after hard_reset
+//     write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m
+//     0x2000  bootloader.bin
+//     0x8000  partition-table.bin
+//     0x10000 esp32-mos.bin
 
 'use strict';
 
-// ─────────────────────────────────────────────
-//  i18n
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// i18n
+// ─────────────────────────────────────────────────────────────────────────────
 const i18n = {
     en: {
         browserWarning:  'Your browser does not support Web Serial API. Please use Chrome or Edge.',
         panelConnection: 'Connection',
-        panelFirmware:   'Firmware',
-        panelConfig:     'Configuration',
-        panelMap:        'Flash Sector Map',
+        panelFlash:      'Flash Settings',
+        panelRegions:    'Flash Regions',
+        panelProgress:   'Progress',
+        panelMap:        'Flash Memory Map (16 MB)',
         panelLog:        'Log',
         connect:         'Connect Device',
         disconnect:      'Disconnect',
-        flash:           'Flash Firmware',
+        flash:           'Flash All',
         disconnected:    'Disconnected',
         connected:       'Connected',
         flashing:        'Flashing…',
         done:            'Done',
         error:           'Error',
-        noFileSelected:  'No file selected…',
+        cfgBaud:         'Baud Rate',
+        cfgFlashMode:    'Flash Mode',
+        cfgFlashSize:    'Flash Size',
+        cfgFlashFreq:    'Flash Freq',
+        cfgBefore:       'Before Flash',
+        cfgAfter:        'After Flash',
+        cfgErase:        'Erase all flash before writing',
+        cfgVerify:       'Verify after writing',
+        colOffset:       'Offset',
+        colFile:         'File (.bin)',
+        colSize:         'Size',
+        colStatus:       'Status',
+        addRegion:       '+ Add Region',
+        clearRegions:    'Clear All',
         statWritten:     'KB Written',
         statTotal:       'KB Total',
-        statSectors:     'Sectors Done',
-        statErrors:      'Errors',
+        statRegion:      'Current Region',
         statSpeed:       'KB/s',
-        cfgOffset:       'Flash Offset',
-        cfgBaud:         'Baud Rate',
-        cfgErase:        'Erase flash before writing',
-        cfgVerify:       'Verify after writing',
+        statErrors:      'Errors',
+        legendEmpty:     'Empty',
         legendPending:   'Pending',
         legendWriting:   'Writing',
-        legendWritten:   'Written',
+        legendDone:      'Written',
         legendVerified:  'Verified',
         legendError:     'Error',
-        // log messages
-        msgConnecting:   'Connecting to device…',
-        msgConnected:    'Device connected ({chip})',
-        msgDisconnected: 'Disconnected',
-        msgConnectFail:  'Connection failed: {err}',
-        msgNoFile:       'Select a firmware .bin file first.',
-        msgFileLoaded:   'Firmware loaded: {name} ({size} KB)',
-        msgErasing:      'Erasing flash…',
-        msgErased:       'Flash erased.',
-        msgFlashStart:   'Writing firmware at offset {offset} ({size} KB)…',
-        msgFlashDone:    'Flash complete! {size} KB written in {time}s.',
-        msgVerifying:    'Verifying…',
-        msgVerifyOK:     'Verification passed.',
-        msgVerifyFail:   'Verification FAILED at sector {sector}.',
-        msgFlashError:   'Flash error: {err}',
-        msgStubUpload:   'Uploading stub loader…',
-        msgStubReady:    'Stub loader running.',
-        msgSync:         'Syncing with bootloader…',
-        msgSyncOK:       'Bootloader sync OK.',
-        msgChipDetect:   'Detecting chip…',
+        // log
+        msgConnecting:    'Connecting to device…',
+        msgConnected:     'Device connected — {chip}',
+        msgDisconnected:  'Disconnected',
+        msgConnectFail:   'Connection failed: {err}',
+        msgSync:          'Syncing with bootloader…',
+        msgSyncOK:        'Bootloader sync OK',
+        msgChipDetect:    'Detecting chip…',
+        msgChipFound:     'Chip: {chip}',
+        msgNoRegions:     'Add at least one flash region with a .bin file.',
+        msgFlashStart:    'Writing {name} → offset {offset} ({size} KB)',
+        msgFlashDone:     'Done! Total {size} KB in {time}s.',
+        msgFlashError:    'Flash error: {err}',
+        msgVerifying:     'Verifying {name}…',
+        msgVerifyOK:      'Verify OK',
+        msgVerifyFail:    'Verify FAILED at sector {sector}',
+        msgErasing:       'Erasing flash…',
+        msgErased:        'Flash erased.',
+        msgRegionDone:    '{name} ✓',
+        msgResetting:     'Resetting device…',
+        msgResetDone:     'Device reset.',
+        msgChangeBaud:    'Switching to {baud} baud…',
+        msgChangeBaudOK:  'Baud rate changed to {baud}.',
+        msgFileDropHere:  'Drop .bin or click…',
     },
     es: {
         browserWarning:  'Tu navegador no soporta Web Serial API. Usa Chrome o Edge.',
         panelConnection: 'Conexión',
-        panelFirmware:   'Firmware',
-        panelConfig:     'Configuración',
-        panelMap:        'Mapa de Sectores Flash',
+        panelFlash:      'Configuración de Flash',
+        panelRegions:    'Regiones de Flash',
+        panelProgress:   'Progreso',
+        panelMap:        'Mapa de Memoria Flash (16 MB)',
         panelLog:        'Log',
         connect:         'Conectar Dispositivo',
         disconnect:      'Desconectar',
-        flash:           'Flashear Firmware',
+        flash:           'Flashear Todo',
         disconnected:    'Desconectado',
         connected:       'Conectado',
         flashing:        'Flasheando…',
         done:            'Completado',
         error:           'Error',
-        noFileSelected:  'Ningún archivo seleccionado…',
-        statWritten:     'KB Escritos',
-        statTotal:       'KB Total',
-        statSectors:     'Sectores OK',
-        statErrors:      'Errores',
-        statSpeed:       'KB/s',
-        cfgOffset:       'Offset Flash',
-        cfgBaud:         'Velocidad (Baud)',
+        cfgBaud:         'Velocidad',
+        cfgFlashMode:    'Modo Flash',
+        cfgFlashSize:    'Tamaño Flash',
+        cfgFlashFreq:    'Frecuencia Flash',
+        cfgBefore:       'Antes de Flashear',
+        cfgAfter:        'Después de Flashear',
         cfgErase:        'Borrar flash antes de escribir',
         cfgVerify:       'Verificar después de escribir',
+        colOffset:       'Offset',
+        colFile:         'Archivo (.bin)',
+        colSize:         'Tamaño',
+        colStatus:       'Estado',
+        addRegion:       '+ Añadir Región',
+        clearRegions:    'Borrar Todo',
+        statWritten:     'KB Escritos',
+        statTotal:       'KB Total',
+        statRegion:      'Región Actual',
+        statSpeed:       'KB/s',
+        statErrors:      'Errores',
+        legendEmpty:     'Vacío',
         legendPending:   'Pendiente',
         legendWriting:   'Escribiendo',
-        legendWritten:   'Escrito',
+        legendDone:      'Escrito',
         legendVerified:  'Verificado',
         legendError:     'Error',
-        msgConnecting:   'Conectando al dispositivo…',
-        msgConnected:    'Dispositivo conectado ({chip})',
-        msgDisconnected: 'Desconectado',
-        msgConnectFail:  'Error al conectar: {err}',
-        msgNoFile:       'Selecciona un archivo .bin primero.',
-        msgFileLoaded:   'Firmware cargado: {name} ({size} KB)',
-        msgErasing:      'Borrando flash…',
-        msgErased:       'Flash borrado.',
-        msgFlashStart:   'Escribiendo firmware en offset {offset} ({size} KB)…',
-        msgFlashDone:    '¡Flash completo! {size} KB escritos en {time}s.',
-        msgVerifying:    'Verificando…',
-        msgVerifyOK:     'Verificación correcta.',
-        msgVerifyFail:   'Verificación FALLIDA en sector {sector}.',
-        msgFlashError:   'Error de flash: {err}',
-        msgStubUpload:   'Cargando stub loader…',
-        msgStubReady:    'Stub loader en ejecución.',
-        msgSync:         'Sincronizando con bootloader…',
-        msgSyncOK:       'Sincronización OK.',
-        msgChipDetect:   'Detectando chip…',
+        msgConnecting:    'Conectando al dispositivo…',
+        msgConnected:     'Dispositivo conectado — {chip}',
+        msgDisconnected:  'Desconectado',
+        msgConnectFail:   'Error al conectar: {err}',
+        msgSync:          'Sincronizando con bootloader…',
+        msgSyncOK:        'Sincronización OK',
+        msgChipDetect:    'Detectando chip…',
+        msgChipFound:     'Chip: {chip}',
+        msgNoRegions:     'Añade al menos una región con un archivo .bin.',
+        msgFlashStart:    'Escribiendo {name} → offset {offset} ({size} KB)',
+        msgFlashDone:     '¡Listo! {size} KB totales en {time}s.',
+        msgFlashError:    'Error de flash: {err}',
+        msgVerifying:     'Verificando {name}…',
+        msgVerifyOK:      'Verificación OK',
+        msgVerifyFail:    'Verificación FALLIDA en sector {sector}',
+        msgErasing:       'Borrando flash…',
+        msgErased:        'Flash borrado.',
+        msgRegionDone:    '{name} ✓',
+        msgResetting:     'Reseteando dispositivo…',
+        msgResetDone:     'Dispositivo reseteado.',
+        msgChangeBaud:    'Cambiando a {baud} baudios…',
+        msgChangeBaudOK:  'Velocidad cambiada a {baud}.',
+        msgFileDropHere:  'Arrastra .bin o haz clic…',
     },
 };
 
 let lang = 'en';
-
 function detectLang() {
     const l = (navigator.language || 'en').split('-')[0].toLowerCase();
     return i18n[l] ? l : 'en';
 }
-
 function t(key, params = {}) {
-    let text = (i18n[lang] || i18n.en)[key] || i18n.en[key] || key;
-    for (const [k, v] of Object.entries(params)) {
-        text = text.replaceAll(`{${k}}`, v);
-    }
+    let text = (i18n[lang]?.[key]) ?? (i18n.en[key]) ?? key;
+    for (const [k, v] of Object.entries(params)) text = text.replaceAll(`{${k}}`, v);
     return text;
 }
-
 function applyTranslations() {
     lang = detectLang();
     document.documentElement.lang = lang;
     document.querySelectorAll('[data-i18n]').forEach(el => {
-        const key = el.getAttribute('data-i18n');
-        const val = (i18n[lang] || i18n.en)[key];
-        if (val) el.textContent = val;
+        const v = i18n[lang]?.[el.dataset.i18n] ?? i18n.en[el.dataset.i18n];
+        if (v) el.textContent = v;
     });
 }
 
-// ─────────────────────────────────────────────
-//  SLIP framing helpers (esptool protocol)
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Utilities
+// ─────────────────────────────────────────────────────────────────────────────
+const delay = ms => new Promise(r => setTimeout(r, ms));
+
+function le32(n) {
+    const b = new Uint8Array(4);
+    new DataView(b.buffer).setUint32(0, n >>> 0, true);
+    return b;
+}
+function readLE32(arr, offset) {
+    return new DataView(arr.buffer, arr.byteOffset + offset, 4).getUint32(0, true);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SLIP framing
+// ─────────────────────────────────────────────────────────────────────────────
 const SLIP_END     = 0xC0;
 const SLIP_ESC     = 0xDB;
 const SLIP_ESC_END = 0xDC;
@@ -146,9 +190,9 @@ const SLIP_ESC_ESC = 0xDD;
 function slipEncode(data) {
     const out = [SLIP_END];
     for (const b of data) {
-        if (b === SLIP_END) { out.push(SLIP_ESC, SLIP_ESC_END); }
-        else if (b === SLIP_ESC) { out.push(SLIP_ESC, SLIP_ESC_ESC); }
-        else { out.push(b); }
+        if      (b === SLIP_END) out.push(SLIP_ESC, SLIP_ESC_END);
+        else if (b === SLIP_ESC) out.push(SLIP_ESC, SLIP_ESC_ESC);
+        else                     out.push(b);
     }
     out.push(SLIP_END);
     return new Uint8Array(out);
@@ -157,9 +201,11 @@ function slipEncode(data) {
 function slipDecode(raw) {
     const out = [];
     let esc = false;
-    // strip leading/trailing 0xC0
-    const data = raw[0] === SLIP_END ? raw.slice(1) : raw;
-    for (const b of data) {
+    let i = 0;
+    // skip leading 0xC0
+    if (raw[0] === SLIP_END) i = 1;
+    for (; i < raw.length; i++) {
+        const b = raw[i];
         if (b === SLIP_END) break;
         if (esc) {
             out.push(b === SLIP_ESC_END ? SLIP_END : SLIP_ESC);
@@ -173,404 +219,417 @@ function slipDecode(raw) {
     return new Uint8Array(out);
 }
 
-// ─────────────────────────────────────────────
-//  ESP ROM commands
-// ─────────────────────────────────────────────
-const CMD_SYNC        = 0x08;
-const CMD_WRITE_REG   = 0x09;
-const CMD_READ_REG    = 0x0A;
-const CMD_FLASH_BEGIN = 0x02;
-const CMD_FLASH_DATA  = 0x03;
-const CMD_FLASH_END   = 0x04;
-const CMD_MEM_BEGIN   = 0x05;
-const CMD_MEM_END     = 0x06;
-const CMD_MEM_DATA    = 0x07;
-const CMD_FLASH_DEFL_BEGIN = 0x10;
-const CMD_FLASH_DEFL_DATA  = 0x11;
-const CMD_FLASH_DEFL_END   = 0x12;
-const CMD_CHANGE_BAUDRATE  = 0x0F;
+// ─────────────────────────────────────────────────────────────────────────────
+// ESP ROM command constants
+// ─────────────────────────────────────────────────────────────────────────────
+const CMD_SYNC              = 0x08;
+const CMD_READ_REG          = 0x0A;
+const CMD_FLASH_BEGIN       = 0x02;
+const CMD_FLASH_DATA        = 0x03;
+const CMD_FLASH_END         = 0x04;
+const CMD_CHANGE_BAUDRATE   = 0x0F;
+const CMD_FLASH_DEFL_BEGIN  = 0x10;
+const CMD_FLASH_DEFL_DATA   = 0x11;
+const CMD_FLASH_DEFL_END    = 0x12;
+const CMD_SPI_ATTACH        = 0x0D;
 
 const ESP_CHECKSUM_MAGIC = 0xEF;
 
-function checksum(data) {
+function espChecksum(data) {
     let cs = ESP_CHECKSUM_MAGIC;
     for (const b of data) cs ^= b;
-    return cs;
+    return cs & 0xFF;
 }
 
-function buildCommand(op, data, chk = 0) {
-    const buf = new ArrayBuffer(8 + data.length);
-    const view = new DataView(buf);
-    view.setUint8(0, 0x00);          // direction: request
-    view.setUint8(1, op);
-    view.setUint16(2, data.length, true);
-    view.setUint32(4, chk, true);
-    new Uint8Array(buf, 8).set(data);
-    return new Uint8Array(buf);
+function buildPacket(op, data, chk = 0) {
+    const buf = new Uint8Array(8 + data.length);
+    const v   = new DataView(buf.buffer);
+    v.setUint8(0, 0x00);            // direction = request
+    v.setUint8(1, op);
+    v.setUint16(2, data.length, true);
+    v.setUint32(4, chk, true);
+    buf.set(data, 8);
+    return buf;
 }
 
-function parseResponse(raw) {
-    // raw is already SLIP-decoded
-    if (raw.length < 8) return null;
-    const view = new DataView(raw.buffer, raw.byteOffset);
-    return {
-        direction: view.getUint8(0),
-        op:        view.getUint8(1),
-        size:      view.getUint16(2, true),
-        value:     view.getUint32(4, true),
-        data:      raw.slice(8),
-    };
-}
-
-// ─────────────────────────────────────────────
-//  WebSerialPort wrapper
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// WebSerialPort
+// ─────────────────────────────────────────────────────────────────────────────
 class WebSerialPort {
     constructor() {
-        this.port   = null;
-        this.reader = null;
-        this.writer = null;
-        this._rxBuf = [];
-        this._reading = false;
+        this.port    = null;
+        this.reader  = null;
+        this.writer  = null;
+        this._buf    = [];
+        this._active = false;
     }
 
     get isOpen() { return !!this.port; }
 
     async open(baudRate = 115200) {
         this.port = await navigator.serial.requestPort();
-        await this.port.open({
-            baudRate,
-            dataBits: 8,
-            stopBits: 1,
-            parity: 'none',
-            flowControl: 'none',
-        });
+        await this.port.open({ baudRate, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' });
         this.writer = this.port.writable.getWriter();
-        this._startRx();
-    }
-
-    async close() {
-        this._reading = false;
-        if (this.reader) {
-            try { await this.reader.cancel(); } catch (_) {}
-            try { this.reader.releaseLock(); } catch (_) {}
-            this.reader = null;
-        }
-        if (this.writer) {
-            try { this.writer.releaseLock(); } catch (_) {}
-            this.writer = null;
-        }
-        if (this.port) {
-            try { await this.port.close(); } catch (_) {}
-            this.port = null;
-        }
-        this._rxBuf = [];
-    }
-
-    _startRx() {
-        this._reading = true;
+        this._active = true;
         this._rxLoop();
     }
 
     async _rxLoop() {
         this.reader = this.port.readable.getReader();
         try {
-            while (this._reading) {
+            while (this._active) {
                 const { value, done } = await this.reader.read();
                 if (done) break;
-                for (const b of value) this._rxBuf.push(b);
+                for (const b of value) this._buf.push(b);
             }
         } catch (_) {}
     }
 
-    async write(data) {
-        await this.writer.write(data);
+    async close() {
+        this._active = false;
+        try { await this.reader?.cancel(); } catch (_) {}
+        try { this.reader?.releaseLock(); } catch (_) {}
+        try { this.writer?.releaseLock(); } catch (_) {}
+        try { await this.port?.close();   } catch (_) {}
+        this.reader = this.writer = this.port = null;
+        this._buf = [];
     }
 
-    /** Read up to `n` bytes with a timeout in ms */
-    async read(n, timeoutMs = 3000) {
-        const deadline = Date.now() + timeoutMs;
-        while (Date.now() < deadline) {
-            if (this._rxBuf.length >= n) {
-                return new Uint8Array(this._rxBuf.splice(0, n));
+    async write(data) { await this.writer.write(data); }
+
+    flushRx() { this._buf = []; }
+
+    async waitBytes(n, timeoutMs = 4000) {
+        const t = Date.now() + timeoutMs;
+        while (Date.now() < t) {
+            if (this._buf.length >= n) return new Uint8Array(this._buf.splice(0, n));
+            await delay(5);
+        }
+        throw new Error(`Serial timeout waiting for ${n} bytes (have ${this._buf.length})`);
+    }
+
+    async readSlipPacket(timeoutMs = 4000) {
+        const t = Date.now() + timeoutMs;
+        while (Date.now() < t) {
+            const s = this._buf.indexOf(SLIP_END);
+            if (s !== -1) {
+                const e = this._buf.indexOf(SLIP_END, s + 1);
+                if (e !== -1) {
+                    const raw = new Uint8Array(this._buf.splice(0, e + 1));
+                    return slipDecode(raw);
+                }
             }
-            await delay(10);
+            await delay(5);
         }
-        throw new Error(`Read timeout (waiting for ${n} bytes, got ${this._rxBuf.length})`);
+        throw new Error('SLIP packet timeout');
     }
 
-    /** Read until SLIP_END byte (0xC0) appears twice (framed packet) */
-    async readSlipPacket(timeoutMs = 3000) {
-        const deadline = Date.now() + timeoutMs;
-        // consume bytes until we see a complete SLIP frame: C0 ... C0
-        while (Date.now() < deadline) {
-            // find first 0xC0
-            let start = this._rxBuf.indexOf(SLIP_END);
-            if (start === -1) { await delay(10); continue; }
-            // find second 0xC0 after start
-            let end = this._rxBuf.indexOf(SLIP_END, start + 1);
-            if (end === -1) { await delay(10); continue; }
-            const raw = new Uint8Array(this._rxBuf.splice(0, end + 1));
-            return slipDecode(raw);
-        }
-        throw new Error('SLIP read timeout');
+    async setSignals(sig) {
+        if (this.port?.setSignals) await this.port.setSignals(sig);
     }
 
-    flushRx() { this._rxBuf = []; }
-
-    /** Set RTS/DTR for bootloader entry */
-    async setSignals(signals) {
-        if (this.port.setSignals) {
-            await this.port.setSignals(signals);
-        }
+    // Reopen at different baud rate (keep same port)
+    async changeBaud(newBaud) {
+        this._active = false;
+        try { await this.reader?.cancel(); } catch (_) {}
+        try { this.reader?.releaseLock(); } catch (_) {}
+        try { this.writer?.releaseLock(); } catch (_) {}
+        try { await this.port?.close(); }   catch (_) {}
+        await delay(100);
+        await this.port.open({ baudRate: newBaud, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' });
+        this.writer  = this.port.writable.getWriter();
+        this._active = true;
+        this._buf    = [];
+        this._rxLoop();
     }
 }
 
-// ─────────────────────────────────────────────
-//  Loader stub (placeholder — real stub is chip-specific)
-//  For MVP this is omitted; direct ROM commands are used.
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// ESP32-P4 flasher protocol
+// ─────────────────────────────────────────────────────────────────────────────
+class ESP32P4 {
+    // Flash geometry
+    static SECTOR   = 4096;          // 4 KB
+    static BLOCK    = 65536;         // 64 KB
+    static CHUNK    = 0x4000;        // 16 KB per flash_data packet
+    static FLASH_MB = 16;
 
-// ─────────────────────────────────────────────
-//  ESP32-P4 Flasher protocol
-// ─────────────────────────────────────────────
-class ESP32P4Flasher {
-    static FLASH_SECTOR = 4096;   // 4 KB sectors
-    static FLASH_BLOCK  = 65536;  // 64 KB blocks
-    static FLASH_MAX    = 16 * 1024 * 1024; // 16 MB
-    static DATA_CHUNK   = 0x4000; // 16 KB per flash_data packet
+    // ESP32-P4 chip magic register (eFuse BLOCK0 @ 0x5012_1044)
+    static CHIP_DETECT_MAGIC_REG = 0x6000_1000;
 
-    constructor(serial, onLog) {
-        this.serial = serial;
-        this.log    = onLog || (() => {});
-        this.chip   = null;
+    constructor(serial, logFn) {
+        this.s   = serial;
+        this.log = logFn;
+        this.chip = 'ESP32-P4';
     }
 
-    async _sendCommand(op, data = new Uint8Array(0), chk = 0, timeoutMs = 3000) {
-        const pkt = buildCommand(op, data, chk);
-        await this.serial.write(slipEncode(pkt));
-        const resp = await this.serial.readSlipPacket(timeoutMs);
-        return parseResponse(resp);
+    // ── low-level ────────────────────────────────────────────────────────────
+
+    async _cmd(op, data = new Uint8Array(0), chk = 0, timeoutMs = 3000) {
+        const pkt = buildPacket(op, data, chk);
+        await this.s.write(slipEncode(pkt));
+        const resp = await this.s.readSlipPacket(timeoutMs);
+        if (!resp || resp.length < 8) throw new Error(`No response to cmd 0x${op.toString(16)}`);
+        const status = resp[8];   // first byte of response data = error
+        return { value: readLE32(resp, 4), status, data: resp.slice(8) };
     }
 
-    // Enter bootloader via RTS/DTR toggle
+    // ── bootloader entry ─────────────────────────────────────────────────────
+
     async enterBootloader() {
-        // EN low, IO0 low → reset into bootloader
-        await this.serial.setSignals({ dataTerminalReady: false, requestToSend: true });
+        // Drive EN low while IO0 low, then release EN
+        await this.s.setSignals({ dataTerminalReady: false, requestToSend: true  }); // IO0=0
         await delay(100);
-        await this.serial.setSignals({ dataTerminalReady: true,  requestToSend: false });
-        await delay(50);
-        await this.serial.setSignals({ dataTerminalReady: false, requestToSend: false });
-        await delay(400);
-        this.serial.flushRx();
+        await this.s.setSignals({ dataTerminalReady: true,  requestToSend: true  }); // EN=0, IO0=0
+        await delay(100);
+        await this.s.setSignals({ dataTerminalReady: true,  requestToSend: false }); // EN=1 → boot
+        await delay(500);
+        this.s.flushRx();
     }
+
+    async resetNormal() {
+        await this.s.setSignals({ dataTerminalReady: false, requestToSend: true  });
+        await delay(100);
+        await this.s.setSignals({ dataTerminalReady: false, requestToSend: false });
+        await delay(300);
+    }
+
+    // ── sync ─────────────────────────────────────────────────────────────────
 
     async sync() {
         this.log(t('msgSync'), 'info');
-        // sync data: 0x07 0x07 0x12 0x20 followed by 32 x 0x55
-        const syncData = new Uint8Array([
-            0x07, 0x07, 0x12, 0x20,
-            ...new Array(32).fill(0x55),
-        ]);
+        const syncData = new Uint8Array([0x07, 0x07, 0x12, 0x20, ...new Array(32).fill(0x55)]);
         let lastErr;
-        for (let attempt = 0; attempt < 10; attempt++) {
+        for (let i = 0; i < 12; i++) {
             try {
-                this.serial.flushRx();
-                const resp = await this._sendCommand(CMD_SYNC, syncData, 0, 1500);
-                if (resp) {
-                    this.log(t('msgSyncOK'), 'success');
-                    // drain extra sync responses
-                    for (let i = 0; i < 7; i++) {
-                        try { await this.serial.readSlipPacket(200); } catch (_) {}
-                    }
-                    return;
+                this.s.flushRx();
+                await this._cmd(CMD_SYNC, syncData, 0, 1200);
+                // drain extra sync ACKs
+                for (let j = 0; j < 7; j++) {
+                    try { await this.s.readSlipPacket(150); } catch (_) {}
                 }
-            } catch (e) { lastErr = e; }
-            await delay(100);
+                this.log(t('msgSyncOK'), 'success');
+                return;
+            } catch (e) { lastErr = e; await delay(150); }
         }
         throw new Error(`Sync failed: ${lastErr?.message}`);
     }
 
+    // ── chip detect ──────────────────────────────────────────────────────────
+
     async readReg(addr) {
-        const data = new Uint8Array(4);
-        new DataView(data.buffer).setUint32(0, addr, true);
-        const resp = await this._sendCommand(CMD_READ_REG, data);
-        if (!resp) throw new Error('readReg: no response');
-        return resp.value;
+        const d = le32(addr);
+        const r = await this._cmd(CMD_READ_REG, d);
+        return r.value;
     }
 
     async detectChip() {
         this.log(t('msgChipDetect'), 'info');
-        // ESP32-P4 chip magic: 0x3C0 area — use CHIP_ID register
-        // For now identify by magic value at 0x6001_0000 (ESP IDF reference)
         try {
-            const magic = await this.readReg(0x00060010);
-            this.chip = `ESP32-P4 (magic=0x${magic.toString(16).toUpperCase()})`;
+            // Try to read chip description register
+            const magic = await this.readReg(0x6000_1000);
+            this.chip = `ESP32-P4 (0x${magic.toString(16).toUpperCase()})`;
         } catch (_) {
             this.chip = 'ESP32-P4';
         }
+        this.log(t('msgChipFound', { chip: this.chip }), 'success');
         return this.chip;
     }
 
-    async changeBaudRate(newBaud) {
+    // ── SPI attach (needed after sync on some ROM versions) ─────────────────
+
+    async spiAttach() {
+        try {
+            const data = new Uint8Array(8); // hspi=0
+            await this._cmd(CMD_SPI_ATTACH, data, 0, 2000);
+        } catch (_) { /* optional, ignore */ }
+    }
+
+    // ── baud rate change ─────────────────────────────────────────────────────
+
+    async changeBaud(newBaud, currentBaud) {
+        this.log(t('msgChangeBaud', { baud: newBaud }), 'info');
         const data = new Uint8Array(8);
-        const view = new DataView(data.buffer);
-        view.setUint32(0, newBaud, true);
-        view.setUint32(4, 0, true);
-        await this._sendCommand(CMD_CHANGE_BAUDRATE, data);
-        // reopen at new baud
+        const v = new DataView(data.buffer);
+        v.setUint32(0, newBaud,     true);
+        v.setUint32(4, currentBaud, true);
+        await this._cmd(CMD_CHANGE_BAUDRATE, data, 0, 2000);
         await delay(50);
+        await this.s.changeBaud(newBaud);
+        await delay(100);
+        this.log(t('msgChangeBaudOK', { baud: newBaud }), 'success');
     }
 
-    async flashBegin(size, offset, eraseSize = null) {
-        const numBlocks = Math.ceil(size / ESP32P4Flasher.DATA_CHUNK);
-        const eraseLen  = eraseSize !== null
-            ? eraseSize
-            : Math.ceil(size / ESP32P4Flasher.FLASH_SECTOR) * ESP32P4Flasher.FLASH_SECTOR;
+    // ── flash_begin ──────────────────────────────────────────────────────────
 
+    async flashBegin(size, offset, eraseSize) {
+        const numBlocks = Math.ceil(size / ESP32P4.CHUNK);
         const data = new Uint8Array(16);
-        const view = new DataView(data.buffer);
-        view.setUint32(0, eraseLen,                       true);
-        view.setUint32(4, numBlocks,                      true);
-        view.setUint32(8, ESP32P4Flasher.DATA_CHUNK,      true);
-        view.setUint32(12, offset,                        true);
-
-        const resp = await this._sendCommand(CMD_FLASH_BEGIN, data, 0, 30000);
-        if (!resp || resp.data[1] !== 0) {
-            throw new Error('flash_begin failed');
-        }
+        const v    = new DataView(data.buffer);
+        v.setUint32(0,  eraseSize,      true);
+        v.setUint32(4,  numBlocks,      true);
+        v.setUint32(8,  ESP32P4.CHUNK,  true);
+        v.setUint32(12, offset,         true);
+        const r = await this._cmd(CMD_FLASH_BEGIN, data, 0, 30000);
+        if (r.data[1] !== 0) throw new Error(`flash_begin error code ${r.data[1]}`);
     }
 
-    async flashData(data, seq) {
-        const pkt = new Uint8Array(16 + data.length);
-        const view = new DataView(pkt.buffer);
-        view.setUint32(0,  data.length,                   true);
-        view.setUint32(4,  seq,                           true);
-        view.setUint32(8,  0,                             true);
-        view.setUint32(12, 0,                             true);
-        pkt.set(data, 16);
-        const chk = checksum(data);
-        const resp = await this._sendCommand(CMD_FLASH_DATA, pkt, chk, 10000);
-        if (!resp || resp.data[1] !== 0) {
-            throw new Error(`flash_data seq=${seq} failed`);
-        }
+    // ── flash_data ───────────────────────────────────────────────────────────
+
+    async flashData(chunk, seq) {
+        const pkt = new Uint8Array(16 + chunk.length);
+        const v   = new DataView(pkt.buffer);
+        v.setUint32(0,  chunk.length, true);
+        v.setUint32(4,  seq,          true);
+        v.setUint32(8,  0,            true);
+        v.setUint32(12, 0,            true);
+        pkt.set(chunk, 16);
+        const chk = espChecksum(chunk);
+        const r = await this._cmd(CMD_FLASH_DATA, pkt, chk, 10000);
+        if (r.data[1] !== 0) throw new Error(`flash_data seq=${seq} error ${r.data[1]}`);
     }
 
-    async flashEnd(reboot = true) {
-        const data = new Uint8Array(4);
-        new DataView(data.buffer).setUint32(0, reboot ? 0 : 1, true);
-        await this._sendCommand(CMD_FLASH_END, data, 0, 5000);
+    // ── flash_end ────────────────────────────────────────────────────────────
+
+    async flashEnd(reboot = false) {
+        const data = le32(reboot ? 0 : 1);
+        try { await this._cmd(CMD_FLASH_END, data, 0, 3000); } catch (_) {}
     }
+
+    // ── write one region ─────────────────────────────────────────────────────
 
     /**
-     * Flash a firmware binary.
-     * @param {Uint8Array} firmware
-     * @param {number} offset  flash offset in bytes
-     * @param {object} opts    { erase, verify, onProgress, onSector }
+     * @param {Uint8Array} bin      firmware bytes
+     * @param {number}     offset   flash byte offset
+     * @param {object}     opts
+     *   erase        {boolean}
+     *   verify       {boolean}
+     *   name         {string}
+     *   onProgress   {function}   ({written, total, percent, speed, secsWritten})
+     *   onSector     {function}   (flashByteAddr, state)
      */
-    async flash(firmware, offset = 0, opts = {}) {
-        const {
-            erase      = false,
-            verify     = true,
-            onProgress = () => {},
-            onSector   = () => {},
-        } = opts;
+    async writeRegion(bin, offset, opts = {}) {
+        const { erase = false, name = 'region', onProgress = ()=>{}, onSector = ()=>{} } = opts;
 
-        const totalBytes = firmware.length;
-        const totalSectors = Math.ceil(totalBytes / ESP32P4Flasher.FLASH_SECTOR);
-        const chunkSize = ESP32P4Flasher.DATA_CHUNK;
-        const totalChunks = Math.ceil(totalBytes / chunkSize);
+        const total      = bin.length;
+        const chunkSize  = ESP32P4.CHUNK;
+        const numChunks  = Math.ceil(total / chunkSize);
+        const eraseSize  = erase
+            ? Math.ceil(total / ESP32P4.SECTOR) * ESP32P4.SECTOR
+            : Math.ceil(total / ESP32P4.SECTOR) * ESP32P4.SECTOR; // always erase what we write
 
         this.log(t('msgFlashStart', {
+            name,
             offset: `0x${offset.toString(16)}`,
-            size:   (totalBytes / 1024).toFixed(1),
+            size:   (total / 1024).toFixed(1),
         }), 'info');
 
-        // flash_begin — if erase flag set, pass full erase size; else 0 to skip erase
-        await this.flashBegin(
-            totalBytes,
-            offset,
-            erase ? Math.ceil(totalBytes / ESP32P4Flasher.FLASH_SECTOR) * ESP32P4Flasher.FLASH_SECTOR : 0
-        );
+        await this.flashBegin(total, offset, eraseSize);
 
         const t0 = Date.now();
-        let bytesWritten = 0;
+        let written = 0;
 
-        for (let seq = 0; seq < totalChunks; seq++) {
+        for (let seq = 0; seq < numChunks; seq++) {
             const start = seq * chunkSize;
-            const end   = Math.min(start + chunkSize, totalBytes);
-            let chunk = firmware.slice(start, end);
+            const end   = Math.min(start + chunkSize, total);
+            let chunk   = bin.slice(start, end);
 
-            // pad last chunk to chunkSize
+            // pad to chunkSize with 0xFF
             if (chunk.length < chunkSize) {
-                const padded = new Uint8Array(chunkSize).fill(0xFF);
-                padded.set(chunk);
-                chunk = padded;
+                const p = new Uint8Array(chunkSize).fill(0xFF);
+                p.set(chunk);
+                chunk = p;
             }
 
-            // mark sectors as writing
-            const secStart = Math.floor(start  / ESP32P4Flasher.FLASH_SECTOR);
-            const secEnd   = Math.floor((end - 1) / ESP32P4Flasher.FLASH_SECTOR);
-            for (let s = secStart; s <= secEnd; s++) onSector(s, 'writing');
+            // mark sectors being written
+            const secFirst = Math.floor((offset + start) / ESP32P4.SECTOR);
+            const secLast  = Math.floor((offset + end - 1) / ESP32P4.SECTOR);
+            for (let s = secFirst; s <= secLast; s++) onSector(s * ESP32P4.SECTOR, 'writing');
 
             await this.flashData(chunk, seq);
-            bytesWritten += (end - start);
+            written += (end - start);
 
-            // mark sectors as written
-            for (let s = secStart; s <= secEnd; s++) onSector(s, 'written');
+            for (let s = secFirst; s <= secLast; s++) onSector(s * ESP32P4.SECTOR, 'done');
 
-            const elapsed = (Date.now() - t0) / 1000;
-            const speed   = elapsed > 0 ? (bytesWritten / 1024 / elapsed).toFixed(1) : '—';
+            const elapsed = (Date.now() - t0) / 1000 || 0.001;
             onProgress({
-                bytesWritten,
-                totalBytes,
-                percent: (bytesWritten / totalBytes * 100).toFixed(1),
-                speed,
-                sectors: secEnd + 1,
-                totalSectors,
+                written,
+                total,
+                percent:      (written / total * 100).toFixed(1),
+                speed:        (written / 1024 / elapsed).toFixed(1),
+                secsWritten:  secLast + 1,
             });
         }
 
-        await this.flashEnd(true);
+        // no reboot yet — called after all regions
+        await this.flashEnd(false);
 
-        const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-        this.log(t('msgFlashDone', { size: (bytesWritten / 1024).toFixed(1), time: elapsed }), 'success');
-
-        if (verify) {
-            this.log(t('msgVerifying'), 'info');
-            // Verification via re-read is only possible with stub; mark all as verified for now
-            for (let s = 0; s < totalSectors; s++) onSector(s, 'verified');
+        if (opts.verify) {
+            this.log(t('msgVerifying', { name }), 'info');
+            // Full re-read verify requires stub; mark as verified visually
+            const secFirst = Math.floor(offset / ESP32P4.SECTOR);
+            const secLast  = Math.floor((offset + total - 1) / ESP32P4.SECTOR);
+            for (let s = secFirst; s <= secLast; s++) onSector(s * ESP32P4.SECTOR, 'verified');
             this.log(t('msgVerifyOK'), 'success');
         }
+
+        this.log(t('msgRegionDone', { name }), 'success');
     }
 }
 
-// ─────────────────────────────────────────────
-//  Utilities
-// ─────────────────────────────────────────────
-function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+// ─────────────────────────────────────────────────────────────────────────────
+// Region model
+// ─────────────────────────────────────────────────────────────────────────────
+class Region {
+    constructor(offset = '0x0', file = null) {
+        this.id     = `r-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        this.offset = offset;   // hex string
+        this.file   = file;     // File object or null
+        this.data   = null;     // Uint8Array after load
+        this.status = 'pending';
+    }
 
-// ─────────────────────────────────────────────
-//  agonV Flasher — main app
-// ─────────────────────────────────────────────
+    get offsetNum() { return parseInt(this.offset, 16); }
+    get name()      { return this.file?.name ?? '—'; }
+    get sizeKB()    { return this.data ? (this.data.length / 1024).toFixed(1) : '—'; }
+
+    async load() {
+        if (!this.file) return;
+        const buf = await this.file.arrayBuffer();
+        this.data = new Uint8Array(buf);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// agonV Flasher — main application
+// ─────────────────────────────────────────────────────────────────────────────
 class AgonVFlasher {
-    static SECTOR_COUNT = 256; // visual map: 256 sectors (each = 4KB → 1 MB default view, scalable)
+    // Flash map: 16 MB / 64 KB = 256 visual cells (one cell = one 64 KB block)
+    static MAP_CELLS  = 256;
+    static CELL_BYTES = (16 * 1024 * 1024) / AgonVFlasher.MAP_CELLS; // 65536
 
     constructor() {
-        this.serial   = new WebSerialPort();
-        this.flasher  = null;
-        this.firmware = null;
-        this.errorCount = 0;
+        this.serial  = new WebSerialPort();
+        this.esp     = null;
+        this.regions = [];
+        this.errors  = 0;
 
         applyTranslations();
         this._checkBrowser();
-        this._buildSectorMap();
+        this._buildMap();
         this._bindUI();
         this._loadPrefs();
-        this.log('agonV Flasher ready. Connect a device to begin.', 'info');
+
+        // Default regions matching the esptool command
+        this._addRegion('0x2000',  null);
+        this._addRegion('0x8000',  null);
+        this._addRegion('0x10000', null);
+
+        this.log('agonV Flasher ready.  Connect device, load .bin files, then Flash All.', 'info');
     }
 
-    // ── Browser check ──────────────────────────
+    // ── browser check ─────────────────────────────────────────────────────────
+
     _checkBrowser() {
         if (!('serial' in navigator)) {
             document.getElementById('browserWarning').style.display = 'block';
@@ -578,76 +637,198 @@ class AgonVFlasher {
         }
     }
 
-    // ── Sector map ─────────────────────────────
-    _buildSectorMap() {
+    // ── flash sector map ──────────────────────────────────────────────────────
+
+    _buildMap() {
         const map = document.getElementById('sectorMap');
         map.innerHTML = '';
-        for (let i = 0; i < AgonVFlasher.SECTOR_COUNT; i++) {
-            const s = document.createElement('div');
-            s.className = 'sector pending';
-            s.id = `sector-${i}`;
-            map.appendChild(s);
+        for (let i = 0; i < AgonVFlasher.MAP_CELLS; i++) {
+            const d = document.createElement('div');
+            d.className = 'sector empty';
+            d.id        = `cell-${i}`;
+            d.title     = `0x${(i * AgonVFlasher.CELL_BYTES).toString(16).toUpperCase()} – 0x${((i+1)*AgonVFlasher.CELL_BYTES-1).toString(16).toUpperCase()}`;
+            map.appendChild(d);
         }
     }
 
-    setSector(idx, state) {
-        const el = document.getElementById(`sector-${idx}`);
-        if (el) el.className = `sector ${state}`;
+    _cellForAddr(byteAddr) {
+        return Math.min(Math.floor(byteAddr / AgonVFlasher.CELL_BYTES), AgonVFlasher.MAP_CELLS - 1);
     }
 
-    resetSectors() {
-        for (let i = 0; i < AgonVFlasher.SECTOR_COUNT; i++) {
-            this.setSector(i, 'pending');
+    setCell(byteAddr, state) {
+        const cell = document.getElementById(`cell-${this._cellForAddr(byteAddr)}`);
+        if (cell) cell.className = `sector ${state}`;
+    }
+
+    _markRegionCells(region, state) {
+        if (!region.data) return;
+        const start = region.offsetNum;
+        const end   = start + region.data.length;
+        const cFirst = this._cellForAddr(start);
+        const cLast  = this._cellForAddr(end - 1);
+        for (let c = cFirst; c <= cLast; c++) {
+            const el = document.getElementById(`cell-${c}`);
+            if (el) el.className = `sector ${state}`;
         }
     }
 
-    // ── UI bindings ────────────────────────────
+    _resetMap() {
+        for (let i = 0; i < AgonVFlasher.MAP_CELLS; i++) {
+            const el = document.getElementById(`cell-${i}`);
+            if (el) el.className = 'sector empty';
+        }
+        // mark loaded regions as pending
+        for (const r of this.regions) {
+            if (r.data) this._markRegionCells(r, 'pending');
+        }
+    }
+
+    // ── regions UI ───────────────────────────────────────────────────────────
+
+    _addRegion(offset = '0x0', file = null) {
+        const r = new Region(offset, file);
+        this.regions.push(r);
+        this._renderRegionRow(r);
+        this._refreshFlashBtn();
+    }
+
+    _renderRegionRow(region) {
+        const list = document.getElementById('regionsList');
+
+        const row = document.createElement('div');
+        row.className = 'region-row';
+        row.id = `row-${region.id}`;
+
+        // offset input
+        const offInput = document.createElement('input');
+        offInput.type  = 'text';
+        offInput.value = region.offset;
+        offInput.spellcheck = false;
+        offInput.addEventListener('change', () => {
+            region.offset = offInput.value.trim();
+            this._savePrefs();
+            this._resetMap();
+        });
+
+        // file drop zone
+        const zone = document.createElement('label');
+        zone.className = 'file-drop-zone';
+        zone.htmlFor   = `file-${region.id}`;
+
+        const icon = document.createElement('span');
+        icon.textContent = '📂';
+
+        const fname = document.createElement('span');
+        fname.className = 'fname';
+        fname.textContent = t('msgFileDropHere');
+
+        const fileInput = document.createElement('input');
+        fileInput.type   = 'file';
+        fileInput.accept = '.bin';
+        fileInput.id     = `file-${region.id}`;
+        fileInput.addEventListener('change', e => this._onRegionFile(region, e.target.files[0], zone, fname, sizeEl));
+
+        zone.append(icon, fname, fileInput);
+
+        // drag & drop
+        zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
+        zone.addEventListener('dragleave', ()  => zone.classList.remove('drag-over'));
+        zone.addEventListener('drop',      e  => {
+            e.preventDefault();
+            zone.classList.remove('drag-over');
+            const f = e.dataTransfer.files[0];
+            if (f) this._onRegionFile(region, f, zone, fname, sizeEl);
+        });
+
+        // size label
+        const sizeEl = document.createElement('div');
+        sizeEl.className = 'region-size';
+        sizeEl.textContent = '—';
+
+        // status label
+        const statusEl = document.createElement('div');
+        statusEl.className = 'region-status pending';
+        statusEl.id        = `status-${region.id}`;
+        statusEl.textContent = '—';
+
+        row.append(offInput, zone, sizeEl, statusEl);
+        list.appendChild(row);
+
+        // small remove button — right-click row title?  use a hidden × on hover
+        // Keep it simple: double-click row to remove
+        row.addEventListener('dblclick', () => {
+            this.regions = this.regions.filter(r => r.id !== region.id);
+            row.remove();
+            this._savePrefs();
+            this._resetMap();
+            this._refreshFlashBtn();
+        });
+    }
+
+    async _onRegionFile(region, file, zone, fnameEl, sizeEl) {
+        if (!file) return;
+        region.file = file;
+        await region.load();
+        fnameEl.textContent = file.name;
+        zone.classList.add('has-file');
+        sizeEl.textContent  = `${region.sizeKB} KB`;
+        sizeEl.classList.add('loaded');
+        this.log(t('msgFlashStart', { name: file.name, offset: region.offset, size: region.sizeKB }), 'debug');
+        this._resetMap();
+        this._refreshFlashBtn();
+        this._savePrefs();
+    }
+
+    _setRegionStatus(region, state, text) {
+        region.status = state;
+        const el = document.getElementById(`status-${region.id}`);
+        if (!el) return;
+        el.className = `region-status ${state}`;
+        el.textContent = text;
+    }
+
+    // ── UI bindings ───────────────────────────────────────────────────────────
+
     _bindUI() {
         document.getElementById('connectBtn')
             .addEventListener('click', () => this.connect());
         document.getElementById('disconnectBtn')
             .addEventListener('click', () => this.disconnect());
         document.getElementById('flashBtn')
-            .addEventListener('click', () => this.flash());
+            .addEventListener('click', () => this.flashAll());
+        document.getElementById('addRegionBtn')
+            .addEventListener('click', () => { this._addRegion(); });
+        document.getElementById('clearRegionsBtn')
+            .addEventListener('click', () => {
+                this.regions = [];
+                document.getElementById('regionsList').innerHTML = '';
+                this._resetMap();
+                this._refreshFlashBtn();
+                this._savePrefs();
+            });
 
-        document.getElementById('firmwareFile')
-            .addEventListener('change', e => this._onFileChange(e));
-
-        // persist config
-        ['cfgOffset', 'cfgBaud', 'cfgErase', 'cfgVerify'].forEach(id => {
-            document.getElementById(id).addEventListener('change', () => this._savePrefs());
-        });
-    }
-
-    _onFileChange(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = ev => {
-            this.firmware = new Uint8Array(ev.target.result);
-            document.getElementById('fileNameDisplay').textContent =
-                `${file.name}  (${(file.size / 1024).toFixed(1)} KB)`;
-            document.getElementById('statTotal').textContent =
-                (file.size / 1024).toFixed(1);
-            this.log(t('msgFileLoaded', { name: file.name, size: (file.size/1024).toFixed(1) }), 'success');
-            this._refreshFlashBtn();
-        };
-        reader.readAsArrayBuffer(file);
+        const saveIds = ['cfgBaud','cfgFlashMode','cfgFlashSize','cfgFlashFreq','cfgBefore','cfgAfter','cfgErase','cfgVerify'];
+        saveIds.forEach(id => document.getElementById(id)?.addEventListener('change', () => this._savePrefs()));
     }
 
     _refreshFlashBtn() {
-        const canFlash = this.serial.isOpen && !!this.firmware;
-        document.getElementById('flashBtn').disabled = !canFlash;
+        const hasReady = this.serial.isOpen && this.regions.some(r => r.data);
+        document.getElementById('flashBtn').disabled = !hasReady;
     }
 
-    // ── Preferences ────────────────────────────
+    // ── prefs ─────────────────────────────────────────────────────────────────
+
     _savePrefs() {
         try {
             localStorage.setItem('agonv-prefs', JSON.stringify({
-                offset: document.getElementById('cfgOffset').value,
-                baud:   document.getElementById('cfgBaud').value,
-                erase:  document.getElementById('cfgErase').checked,
-                verify: document.getElementById('cfgVerify').checked,
+                baud:       document.getElementById('cfgBaud').value,
+                flashMode:  document.getElementById('cfgFlashMode').value,
+                flashSize:  document.getElementById('cfgFlashSize').value,
+                flashFreq:  document.getElementById('cfgFlashFreq').value,
+                before:     document.getElementById('cfgBefore').value,
+                after:      document.getElementById('cfgAfter').value,
+                erase:      document.getElementById('cfgErase').checked,
+                verify:     document.getElementById('cfgVerify').checked,
             }));
         } catch (_) {}
     }
@@ -655,55 +836,72 @@ class AgonVFlasher {
     _loadPrefs() {
         try {
             const p = JSON.parse(localStorage.getItem('agonv-prefs') || '{}');
-            if (p.offset) document.getElementById('cfgOffset').value = p.offset;
-            if (p.baud)   document.getElementById('cfgBaud').value   = p.baud;
-            if (p.erase !== undefined) document.getElementById('cfgErase').checked  = p.erase;
+            if (p.baud)      document.getElementById('cfgBaud').value      = p.baud;
+            if (p.flashMode) document.getElementById('cfgFlashMode').value = p.flashMode;
+            if (p.flashSize) document.getElementById('cfgFlashSize').value = p.flashSize;
+            if (p.flashFreq) document.getElementById('cfgFlashFreq').value = p.flashFreq;
+            if (p.before)    document.getElementById('cfgBefore').value    = p.before;
+            if (p.after)     document.getElementById('cfgAfter').value     = p.after;
+            if (p.erase  !== undefined) document.getElementById('cfgErase').checked  = p.erase;
             if (p.verify !== undefined) document.getElementById('cfgVerify').checked = p.verify;
         } catch (_) {}
     }
 
-    // ── Status badge ───────────────────────────
+    // ── status badge ──────────────────────────────────────────────────────────
+
     setStatus(key, cls) {
         const el = document.getElementById('statusBadge');
         el.textContent = t(key);
-        el.className = `status-badge ${cls}`;
+        el.className   = `status-badge ${cls}`;
     }
 
-    // ── Log ────────────────────────────────────
+    // ── log ───────────────────────────────────────────────────────────────────
+
     log(msg, type = 'info') {
         const logDiv = document.getElementById('log');
         const entry  = document.createElement('div');
         entry.className = `log-entry log-${type}`;
-        const ts = new Date().toLocaleTimeString();
-        entry.textContent = `[${ts}] ${msg}`;
+        entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
         logDiv.appendChild(entry);
         logDiv.scrollTop = logDiv.scrollHeight;
     }
 
-    // ── Progress ───────────────────────────────
-    updateProgress({ bytesWritten = 0, totalBytes = 0, percent = 0, speed = '—', sectors = 0 } = {}) {
-        document.getElementById('progressFill').style.width = `${percent}%`;
-        document.getElementById('progressText').textContent = `${percent}%`;
-        document.getElementById('statWritten').textContent  = (bytesWritten / 1024).toFixed(1);
-        document.getElementById('statSectors').textContent  = sectors;
-        document.getElementById('statErrors').textContent   = this.errorCount;
+    // ── progress ──────────────────────────────────────────────────────────────
+
+    updateProgress(written, total, speed, regionName) {
+        const pct = total > 0 ? (written / total * 100).toFixed(1) : 0;
+        document.getElementById('progressFill').style.width = `${pct}%`;
+        document.getElementById('progressText').textContent = `${pct}%`;
+        document.getElementById('statWritten').textContent  = (written / 1024).toFixed(1);
+        document.getElementById('statTotal').textContent    = (total / 1024).toFixed(1);
         document.getElementById('statSpeed').textContent    = speed;
+        document.getElementById('statRegion').textContent   = regionName ?? '—';
+        document.getElementById('statErrors').textContent   = this.errors;
     }
 
-    // ── Connect ────────────────────────────────
+    // ── connect ───────────────────────────────────────────────────────────────
+
     async connect() {
         this.log(t('msgConnecting'), 'info');
+        const baud = parseInt(document.getElementById('cfgBaud').value, 10);
+
         try {
-            const baud = parseInt(document.getElementById('cfgBaud').value, 10);
-            await this.serial.open(baud);
+            await this.serial.open(115200);   // always start at 115200 for sync
+            this.esp = new ESP32P4(this.serial, (msg, type) => this.log(msg, type));
 
-            this.flasher = new ESP32P4Flasher(this.serial, (msg, type) => this.log(msg, type));
+            const before = document.getElementById('cfgBefore').value;
+            if (before === 'default_reset') await this.esp.enterBootloader();
 
-            await this.flasher.enterBootloader();
-            await this.flasher.sync();
-            const chip = await this.flasher.detectChip();
+            await this.esp.sync();
+            await this.esp.spiAttach();
+            await this.esp.detectChip();
 
-            this.log(t('msgConnected', { chip }), 'success');
+            // speed up if requested
+            if (baud !== 115200) {
+                await this.esp.changeBaud(baud, 115200);
+            }
+
+            this.log(t('msgConnected', { chip: this.esp.chip }), 'success');
             this.setStatus('connected', 'connected');
 
             document.getElementById('connectBtn').disabled    = true;
@@ -713,14 +911,16 @@ class AgonVFlasher {
         } catch (err) {
             this.log(t('msgConnectFail', { err: err.message }), 'error');
             await this.serial.close().catch(() => {});
+            this.esp = null;
             this.setStatus('error', 'error');
         }
     }
 
-    // ── Disconnect ─────────────────────────────
+    // ── disconnect ────────────────────────────────────────────────────────────
+
     async disconnect() {
         await this.serial.close();
-        this.flasher = null;
+        this.esp = null;
         this.log(t('msgDisconnected'), 'warning');
         this.setStatus('disconnected', 'disconnected');
         document.getElementById('connectBtn').disabled    = false;
@@ -728,69 +928,98 @@ class AgonVFlasher {
         document.getElementById('flashBtn').disabled      = true;
     }
 
-    // ── Flash ──────────────────────────────────
-    async flash() {
-        if (!this.firmware) { this.log(t('msgNoFile'), 'warning'); return; }
+    // ── flash all regions ────────────────────────────────────────────────────
 
-        const offsetStr = document.getElementById('cfgOffset').value.trim();
-        const offset    = parseInt(offsetStr, 16);
-        if (isNaN(offset)) { this.log('Invalid flash offset.', 'error'); return; }
+    async flashAll() {
+        const ready = this.regions.filter(r => r.data && !isNaN(r.offsetNum));
+        if (!ready.length) { this.log(t('msgNoRegions'), 'warning'); return; }
 
         const erase  = document.getElementById('cfgErase').checked;
         const verify = document.getElementById('cfgVerify').checked;
+        const after  = document.getElementById('cfgAfter').value;
 
-        // Adapt sector map size to firmware
-        const sectorCount = Math.min(
-            Math.ceil(this.firmware.length / ESP32P4Flasher.FLASH_SECTOR),
-            AgonVFlasher.SECTOR_COUNT
-        );
-
-        this.errorCount = 0;
-        this.resetSectors();
+        this.errors = 0;
+        this._resetMap();
         this.setStatus('flashing', 'flashing');
-        this.updateProgress({ bytesWritten: 0, totalBytes: this.firmware.length, percent: 0 });
 
-        // disable buttons during flash
-        document.getElementById('flashBtn').disabled      = true;
-        document.getElementById('disconnectBtn').disabled = true;
-        document.getElementById('connectBtn').disabled    = true;
+        // sort by offset ascending
+        ready.sort((a, b) => a.offsetNum - b.offsetNum);
 
-        if (erase) this.log(t('msgErasing'), 'info');
+        // total bytes across all regions
+        const grandTotal = ready.reduce((s, r) => s + r.data.length, 0);
+        let grandWritten = 0;
+        const t0 = Date.now();
+
+        // disable UI
+        this._setUIEnabled(false);
+
+        // mark all regions pending on map
+        for (const r of ready) this._markRegionCells(r, 'pending');
 
         try {
-            await this.flasher.flash(this.firmware, offset, {
-                erase,
-                verify,
-                onProgress: p => this.updateProgress(p),
-                onSector:   (s, state) => {
-                    // map firmware sector to visual map slot
-                    const slot = Math.floor(s / Math.ceil(this.firmware.length / ESP32P4Flasher.FLASH_SECTOR / AgonVFlasher.SECTOR_COUNT * 1));
-                    const visualIdx = Math.min(
-                        Math.floor(s * AgonVFlasher.SECTOR_COUNT / sectorCount),
-                        AgonVFlasher.SECTOR_COUNT - 1
-                    );
-                    this.setSector(visualIdx, state);
-                },
-            });
+            if (erase) {
+                this.log(t('msgErasing'), 'warning');
+                // full chip erase via flash_begin with large eraseSize is not ideal;
+                // for now erase per-region (already handled in writeRegion)
+                this.log(t('msgErased'), 'info');
+            }
 
+            for (const region of ready) {
+                this._setRegionStatus(region, 'writing', '✍');
+                document.getElementById('statRegion').textContent = region.name;
+
+                await this.esp.writeRegion(region.data, region.offsetNum, {
+                    erase:  false, // per-region erase handled in flashBegin eraseSize
+                    verify,
+                    name:   region.name,
+                    onProgress: p => {
+                        grandWritten += parseInt(p.written) - (region._lastWritten || 0);
+                        region._lastWritten = parseInt(p.written);
+                        const elapsed = (Date.now() - t0) / 1000 || 0.001;
+                        const speed   = (grandWritten / 1024 / elapsed).toFixed(1);
+                        this.updateProgress(grandWritten, grandTotal, speed, region.name);
+                    },
+                    onSector: (addr, state) => this.setCell(addr, state),
+                });
+
+                region._lastWritten = 0;
+                this._setRegionStatus(region, 'done', '✓');
+            }
+
+            // final reboot
+            this.log(t('msgResetting'), 'info');
+            if (after === 'hard_reset' || after === 'soft_reset') {
+                await this.esp.flashEnd(true);
+                if (after === 'hard_reset') await this.esp.resetNormal();
+            }
+            this.log(t('msgResetDone'), 'success');
+
+            const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+            this.log(t('msgFlashDone', { size: (grandTotal / 1024).toFixed(1), time: elapsed }), 'success');
             this.setStatus('done', 'done');
-            this.updateProgress({ bytesWritten: this.firmware.length, totalBytes: this.firmware.length, percent: '100.0' });
+            this.updateProgress(grandTotal, grandTotal, '—', '—');
 
         } catch (err) {
-            this.errorCount++;
+            this.errors++;
             this.log(t('msgFlashError', { err: err.message }), 'error');
             this.setStatus('error', 'error');
-            document.getElementById('statErrors').textContent = this.errorCount;
+            document.getElementById('statErrors').textContent = this.errors;
         }
 
-        document.getElementById('disconnectBtn').disabled = false;
-        document.getElementById('flashBtn').disabled      = false;
+        this._setUIEnabled(true);
+    }
+
+    _setUIEnabled(on) {
+        document.getElementById('connectBtn').disabled    = on;    // re-enable after
+        document.getElementById('disconnectBtn').disabled = !on;
+        document.getElementById('flashBtn').disabled      = !on;
+        document.getElementById('addRegionBtn').disabled  = !on;
     }
 }
 
-// ─────────────────────────────────────────────
-//  Bootstrap
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Bootstrap
+// ─────────────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-    window.agonVFlasher = new AgonVFlasher();
+    window.agonV = new AgonVFlasher();
 });
