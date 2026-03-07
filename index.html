@@ -408,6 +408,29 @@
     Your browser does not support Web Serial API. Please use Chrome or Edge.
 </div>
 
+<!-- ── Boot modal ── -->
+<div id="bootModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75);
+     z-index:100; align-items:center; justify-content:center;">
+    <div style="background:#16213e; border:1px solid #00d4ff; border-radius:12px;
+                padding:30px 36px; max-width:420px; width:90%; text-align:center;">
+        <div style="font-size:2.5rem; margin-bottom:12px;">🔌</div>
+        <h2 style="color:#00d4ff; margin:0 0 16px; font-size:1.1rem; letter-spacing:1px;"
+            data-i18n="modalTitle">Enter Bootloader Mode</h2>
+        <p style="color:#aaa; font-size:13px; line-height:1.7; margin:0 0 20px;"
+           data-i18n="modalInstructions">
+            The USB-JTAG port cannot reset the chip automatically.<br><br>
+            <strong style="color:#ffc107;">1.</strong> Hold the <strong style="color:#4ecca3;">BOOT</strong> button<br>
+            <strong style="color:#ffc107;">2.</strong> Press and release <strong style="color:#4ecca3;">RST / EN</strong><br>
+            <strong style="color:#ffc107;">3.</strong> Release <strong style="color:#4ecca3;">BOOT</strong>
+        </p>
+        <div style="background:#0a0a15; border-radius:6px; padding:10px; margin-bottom:20px;">
+            <div style="font-size:11px; color:#555; margin-bottom:6px;" data-i18n="modalWaiting">Waiting for bootloader…</div>
+            <div id="modalTimer" style="font-size:22px; font-weight:700; color:#00d4ff; font-family:monospace;">30</div>
+        </div>
+        <button id="modalCancelBtn" class="danger sm" data-i18n="cancel">Cancel</button>
+    </div>
+</div>
+
 <!-- ── 1. Connection ── -->
 <div class="panel">
     <h2 class="panel-title" data-i18n="panelConnection">Connection</h2>
@@ -461,9 +484,9 @@
         </div>
         <div class="field">
             <label data-i18n="cfgBefore">Before Flash</label>
-            <select id="cfgBefore" title="default_reset: auto via RTS/DTR. no_reset: hold BOOT + press EN manually.">
-                <option value="default_reset" selected>default_reset (auto RTS/DTR)</option>
-                <option value="no_reset">no_reset (manual BOOT+EN)</option>
+            <select id="cfgBefore" title="USB-JTAG: manual BOOT+RST required">
+                <option value="default_reset" selected>default_reset</option>
+                <option value="no_reset">no_reset</option>
             </select>
         </div>
         <div class="field">

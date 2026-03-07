@@ -83,6 +83,12 @@ const i18n = {
         msgPreloadErr:    'Could not load {name}: {err}',
         msgStubUpload:    'Uploading stub loader…',
         msgStubReady:     'Stub running.',
+        modalTitle:       'Enter Bootloader Mode',
+        modalInstructions:'Hold BOOT, press RST/EN, release BOOT.',
+        modalWaiting:     'Waiting for bootloader…',
+        cancel:           'Cancel',
+        msgBootWait:      'Waiting for manual boot… ({s}s remaining)',
+        msgBootTimeout:   'Bootloader not detected. Reset the board manually.',
     },
     es: {
         browserWarning:  'Tu navegador no soporta Web Serial API. Usa Chrome o Edge.',
@@ -153,6 +159,12 @@ const i18n = {
         msgPreloadErr:    'No se pudo cargar {name}: {err}',
         msgStubUpload:    'Cargando stub loader…',
         msgStubReady:     'Stub en ejecución.',
+        modalTitle:       'Entrar en Modo Bootloader',
+        modalInstructions:'Mantén BOOT, pulsa RST/EN, suelta BOOT.',
+        modalWaiting:     'Esperando bootloader…',
+        cancel:           'Cancelar',
+        msgBootWait:      'Esperando boot manual… ({s}s restantes)',
+        msgBootTimeout:   'Bootloader no detectado. Resetea la placa manualmente.',
     },
 };
 
@@ -423,91 +435,100 @@ class ESP32P4 {
     //   RTS=1         (Windows workaround: set RTS again)
     //   DTR=0, RTS=0  → chip out of reset → boots into download mode
 
+    // USB-JTAG/Serial on the ESP32-P4 Olimex does NOT route RTS/DTR to EN/GPIO35.
+    // Hardware reset must be done manually: hold BOOT (GPIO35), press RST/EN, release BOOT.
+    // We show a modal with instructions and wait up to 30s for the first SLIP byte (0xC0)
+    // to appear, which means the ROM bootloader is running and has responded to a sync.
+
     async enterBootloader() {
-        this.log('USB-JTAG/Serial reset sequence…', 'debug');
+        this.log('Manual boot required — showing instructions…', 'info');
 
-        // Send the reset signals while we still have the port open
-        await this.s.setSignals({ requestToSend: false, dataTerminalReady: false });
-        await delay(100);
-        await this.s.setSignals({ dataTerminalReady: true,  requestToSend: false }); // IO0=low
-        await delay(100);
-        await this.s.setSignals({ requestToSend: true,  dataTerminalReady: false }); // EN=low
-        await this.s.setSignals({ requestToSend: true,  dataTerminalReady: false }); // RTS again
-        await delay(100);
-        await this.s.setSignals({ dataTerminalReady: false, requestToSend: false }); // release
-
-        // USB-JTAG: the port disconnects and reconnects after reset.
-        // Close our side, wait for the OS to re-enumerate the device,
-        // then reopen at 115200.
-        this.log('Port will disconnect during reset — waiting for reconnect…', 'debug');
-        this.s._active = false;
-        try { await this.s.reader?.cancel(); } catch (_) {}
-        try { this.s.reader?.releaseLock();  } catch (_) {}
-        try { this.s.writer?.releaseLock();  } catch (_) {}
-        try { await this.s.port?.close();    } catch (_) {}
-        this.s._buf = [];
-
-        // Give the OS time to re-enumerate USB
-        await delay(1500);
-
-        // Reopen — port object is still valid after close/reopen cycle
-        try {
-            await this.s._openPort(115200);
-            this.log('Port reopened after reset.', 'debug');
-        } catch (e) {
-            this.log(`Port reopen failed: ${e.message} — trying waitReconnect…`, 'debug');
-            const ok = await this.s.waitReconnect(4000);
-            if (!ok) throw new Error('USB port did not reconnect after reset.');
-            await this.s._openPort(115200);
-            this.log('Port reconnected and opened.', 'debug');
-        }
-
-        await delay(300);
+        // Flush any app output already in the buffer
         this.s.flushRx();
-        this.log('Reset done, waiting for sync…', 'debug');
+
+        // Show modal and start countdown
+        const cancelled = await this._showBootModal(30);
+        if (cancelled) throw new Error('Cancelled by user.');
     }
 
     async resetHard() {
-        // Hard reset via RTS (USB mode: uses watchdog reset after stub is running)
-        await this.s.setSignals({ requestToSend: true  }); // EN=LOW
-        await delay(200);
-        await this.s.setSignals({ requestToSend: false }); // EN=HIGH
-        await delay(200);
+        // After flashing, stub triggers reset via watchdog write — no RTS needed
+        // Write LP WDT registers to force reset (from esp32p4.py watchdog_reset)
+        const WDT_WPROTECT = 0x50116018;
+        const WDT_CONFIG0  = 0x50116000;
+        const WDT_CONFIG1  = 0x50116004;
+        const WDT_WKEY     = 0x50D83AA1;
+        try {
+            await this._writeReg(WDT_WPROTECT, WDT_WKEY);      // unlock
+            await this._writeReg(WDT_CONFIG1,  2000);           // timeout
+            await this._writeReg(WDT_CONFIG0,  (1<<31)|(5<<28)|(1<<8)|2); // enable
+            await this._writeReg(WDT_WPROTECT, 0);              // lock
+            await delay(600);
+        } catch (_) {}
+    }
+
+    async _writeReg(addr, val) {
+        const data = new Uint8Array(16);
+        const v = new DataView(data.buffer);
+        v.setUint32(0,  addr, true);
+        v.setUint32(4,  val,  true);
+        v.setUint32(8,  0,    true);  // mask
+        v.setUint32(12, 0,    true);  // delay_us
+        await this._cmd(CMD_WRITE_REG, data, 0, 2000);
+    }
+
+    // ── boot modal ───────────────────────────────────────────────────────────
+    // Returns true if cancelled, false if bootloader detected in time.
+
+    async _showBootModal(seconds) {
+        const modal     = document.getElementById('bootModal');
+        const timerEl   = document.getElementById('modalTimer');
+        const cancelBtn = document.getElementById('modalCancelBtn');
+
+        modal.style.display = 'flex';
+        let cancelled = false;
+        const onCancel = () => { cancelled = true; };
+        cancelBtn.addEventListener('click', onCancel, { once: true });
+
+        const deadline = Date.now() + seconds * 1000;
+        let detected   = false;
+
+        while (Date.now() < deadline && !cancelled) {
+            const remaining = Math.ceil((deadline - Date.now()) / 1000);
+            timerEl.textContent = remaining;
+            this.log(t('msgBootWait', { s: remaining }), 'debug');
+
+            // Try one sync — if it works we're in bootloader mode
+            const syncData = new Uint8Array([0x07, 0x07, 0x12, 0x20, ...new Array(32).fill(0x55)]);
+            try {
+                this.s.flushRx();
+                await this._cmd(CMD_SYNC, syncData, 0, 1000);
+                for (let j = 0; j < 8; j++) {
+                    try { await this.s.readSlipPacket(150); } catch (_) {}
+                }
+                detected = true;
+                break;
+            } catch (_) {
+                // Not yet — keep waiting
+            }
+            await delay(500);
+        }
+
+        modal.style.display = 'none';
+        cancelBtn.removeEventListener('click', onCancel);
+
+        if (cancelled) return true;
+        if (!detected) throw new Error(t('msgBootTimeout'));
+        this.log(t('msgSyncOK'), 'success');
+        return false;
     }
 
     // ── sync ─────────────────────────────────────────────────────────────────
 
+    // sync() is called AFTER enterBootloader() has already verified one sync.
+    // This is a no-op — the modal already completed the sync handshake.
     async sync() {
-        this.log(t('msgSync'), 'info');
-        const syncData = new Uint8Array([0x07, 0x07, 0x12, 0x20, ...new Array(32).fill(0x55)]);
-        let lastErr;
-        for (let i = 0; i < 16; i++) {
-            try {
-                // Log what's in the buffer BEFORE flushing — helps diagnose
-                if (this.s.rxLen > 0) {
-                    this.log(`RX buffer (${this.s.rxLen}B): ${this.s.peekRaw(48)}`, 'debug');
-                }
-                this.s.flushRx();
-                this.log(`Sync attempt ${i + 1}/16…`, 'debug');
-                await this._cmd(CMD_SYNC, syncData, 0, 1500);
-                // drain 8 more sync ACKs (esptool does 9 total)
-                for (let j = 0; j < 8; j++) {
-                    try { await this.s.readSlipPacket(200); } catch (_) {}
-                }
-                this.log(t('msgSyncOK'), 'success');
-                return;
-            } catch (e) {
-                lastErr = e;
-                // After failure, log what (if anything) arrived
-                if (this.s.rxLen > 0) {
-                    this.log(`  got ${this.s.rxLen}B: ${this.s.peekRaw(48)}`, 'debug');
-                } else {
-                    this.log(`  no bytes received`, 'debug');
-                }
-                await delay(100);
-            }
-        }
-        throw new Error(`Sync failed: ${lastErr?.message}`);
+        // Already synced in _showBootModal — nothing to do here.
     }
 
     // ── read register ─────────────────────────────────────────────────────────
@@ -1110,15 +1131,8 @@ class AgonVFlasher {
             await this.serial.open(115200);
             this.esp = new ESP32P4(this.serial, (msg, type) => this.log(msg, type));
 
-            if (before === 'default_reset') {
-                // Auto-reset via RTS/DTR
-                await this.esp.enterBootloader();
-            } else {
-                // no_reset: user must manually hold BOOT (GPIO35) and press EN
-                this.log('Manual mode: hold BOOT button, press EN, then release BOOT.', 'warning');
-                await delay(3000); // give user time to do it
-                this.serial.flushRx();
-            }
+            // Always use manual boot modal — USB-JTAG cannot auto-reset
+            await this.esp.enterBootloader();
 
             await this.esp.sync();
             await this.esp.detectChip();
