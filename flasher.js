@@ -302,13 +302,16 @@ class AgonVFlasher {
                 this.log(t('msgRegionDone', { name: r.name }), 'success');
             }
 
-            // Hard reset after flash
+            // Hard reset + disconnect (mirrors esp-web-tools flash.ts)
             this.log(t('msgResetting'), 'info');
             await this.loader.after('hard_reset');
-            this.log(t('msgResetDone'), 'success');
+            await this.transport.disconnect();
+            this.transport = null;
+            this.loader    = null;
 
             const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
             this.log(t('msgFlashDone', { size: (grandTotal / 1024).toFixed(1), time: elapsed }), 'success');
+            this.log(t('msgResetDone'), 'success');
             this.setStatus('done', 'done');
             this.updateProgress(grandTotal, grandTotal, '—', '—');
 
@@ -316,9 +319,16 @@ class AgonVFlasher {
             this.errors++;
             this.log(t('msgFlashError', { err: err.message }), 'error');
             this.setStatus('error', 'error');
+            try { await this.transport?.disconnect(); } catch(_) {}
+            this.transport = null;
+            this.loader    = null;
         }
 
-        this._setUIEnabled(true);
+        // Ready to flash again
+        document.getElementById('connectBtn').disabled    = false;
+        document.getElementById('disconnectBtn').disabled = true;
+        document.getElementById('flashBtn').disabled      = true;
+        this._setUIEnabled(false);
     }
 
     // ── preload default firmware ──────────────────────────────────────────────
