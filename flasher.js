@@ -304,10 +304,7 @@ class AgonVFlasher {
 
             // Hard reset after flash
             this.log(t('msgResetting'), 'info');
-            const after = document.getElementById('cfgAfter').value;
-            if (after === 'hard_reset' || after === 'soft_reset') {
-                await this.loader.hardReset();
-            }
+            await this.loader.after('hard_reset');
             this.log(t('msgResetDone'), 'success');
 
             const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
