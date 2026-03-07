@@ -197,8 +197,10 @@ class AgonVFlasher {
         document.getElementById('connectBtn').disabled = true;
 
         try {
+            // 1. Pick port first
             this.device = await navigator.serial.requestPort();
 
+            // 2. Build loader (does not open port yet)
             this.transport = new Transport(this.device);
             this.loader = new ESPLoader({
                 transport: this.transport,
@@ -206,6 +208,10 @@ class AgonVFlasher {
                 terminal:  makeTerminal((m, tp) => this.log(m, tp)),
             });
 
+            // 3. Show instructions — user puts chip in bootloader, clicks Done
+            await this._showBootModal();
+
+            // 4. Connect immediately after Done click
             const chip = await this.loader.main('no_reset');
             this.log(t('msgConnected', { chip }), 'success');
             this.setStatus('connected', 'connected');
