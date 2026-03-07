@@ -375,42 +375,68 @@ class ESP32P4 {
     }
 
     // ── bootloader entry ─────────────────────────────────────────────────────
+    //
+    // ESP32-P4 strapping pins (from esptool docs + reset.py ClassicReset):
+    //   RTS → EN  (CHIP_PU)   active-low: RTS=True → EN=LOW (in reset)
+    //   DTR → GPIO35          active-low: DTR=True → GPIO35=LOW (boot mode)
+    //
+    // Web Serial API note: setSignals({ requestToSend: true }) drives RTS LOW.
+    //
+    // ClassicReset sequence (esptool reset.py):
+    //   1. DTR=False → GPIO35=HIGH (IO0 idle, not boot mode yet)
+    //   2. RTS=True  → EN=LOW (chip held in reset)
+    //   3. wait 100ms
+    //   4. DTR=True  → GPIO35=LOW (select download/boot mode)
+    //   5. RTS=False → EN=HIGH (release reset, chip boots into download mode)
+    //   6. wait reset_delay (50ms default)
+    //   7. DTR=False → GPIO35=HIGH (release boot pin, done)
 
     async enterBootloader() {
-        // Drive EN low while IO0 low, then release EN
-        await this.s.setSignals({ dataTerminalReady: false, requestToSend: true  }); // IO0=0
+        this.log('Resetting into download mode (ClassicReset)…', 'debug');
+        this.log('  RTS→EN, DTR→GPIO35 (active-low)', 'debug');
+        await this.s.setSignals({ dataTerminalReady: false, requestToSend: false }); // idle
+        await delay(50);
+        await this.s.setSignals({ dataTerminalReady: false, requestToSend: true  }); // EN=LOW (hold reset)
         await delay(100);
-        await this.s.setSignals({ dataTerminalReady: true,  requestToSend: true  }); // EN=0, IO0=0
-        await delay(100);
-        await this.s.setSignals({ dataTerminalReady: true,  requestToSend: false }); // EN=1 → boot
-        await delay(500);
+        await this.s.setSignals({ dataTerminalReady: true,  requestToSend: false }); // GPIO35=LOW + EN=HIGH → boot!
+        await delay(50);
+        await this.s.setSignals({ dataTerminalReady: false, requestToSend: false }); // GPIO35=HIGH (release strapping)
+        await delay(500); // wait for ROM to print banner and be ready
         this.s.flushRx();
+        this.log('Boot sequence done, waiting for sync…', 'debug');
     }
 
     async resetNormal() {
-        await this.s.setSignals({ dataTerminalReady: false, requestToSend: true  });
+        // Hard reset: pull EN low briefly
+        await this.s.setSignals({ dataTerminalReady: false, requestToSend: true  }); // EN=LOW
         await delay(100);
-        await this.s.setSignals({ dataTerminalReady: false, requestToSend: false });
-        await delay(300);
+        await this.s.setSignals({ dataTerminalReady: false, requestToSend: false }); // EN=HIGH
+        await delay(500);
     }
 
     // ── sync ─────────────────────────────────────────────────────────────────
 
     async sync() {
         this.log(t('msgSync'), 'info');
+        // esptool sends: 0x07 0x07 0x12 0x20 + 32×0x55
         const syncData = new Uint8Array([0x07, 0x07, 0x12, 0x20, ...new Array(32).fill(0x55)]);
         let lastErr;
-        for (let i = 0; i < 12; i++) {
+        // esptool tries up to 16 times with ~100ms between attempts
+        for (let i = 0; i < 16; i++) {
             try {
                 this.s.flushRx();
-                await this._cmd(CMD_SYNC, syncData, 0, 1200);
-                // drain extra sync ACKs
-                for (let j = 0; j < 7; j++) {
-                    try { await this.s.readSlipPacket(150); } catch (_) {}
+                this.log(`Sync attempt ${i + 1}/16…`, 'debug');
+                await this._cmd(CMD_SYNC, syncData, 0, 1500);
+                // esptool drains 8 additional sync responses (total 9 including the first)
+                for (let j = 0; j < 8; j++) {
+                    try { await this.s.readSlipPacket(200); } catch (_) {}
                 }
                 this.log(t('msgSyncOK'), 'success');
                 return;
-            } catch (e) { lastErr = e; await delay(150); }
+            } catch (e) {
+                lastErr = e;
+                await delay(100);
+            }
         }
         throw new Error(`Sync failed: ${lastErr?.message}`);
     }
@@ -426,9 +452,10 @@ class ESP32P4 {
     async detectChip() {
         this.log(t('msgChipDetect'), 'info');
         try {
-            // Try to read chip description register
-            const magic = await this.readReg(0x6000_1000);
-            this.chip = `ESP32-P4 (0x${magic.toString(16).toUpperCase()})`;
+            // UART_DATE_REG — unique per chip family (esptool: UART_DATE_REG_ADDR)
+            // ESP32-P4: 0x500CA000 + 0x8C = 0x500CA08C
+            const date = await this.readReg(0x500CA08C);
+            this.chip = `ESP32-P4 (date=0x${date.toString(16).toUpperCase()})`;
         } catch (_) {
             this.chip = 'ESP32-P4';
         }
@@ -436,13 +463,10 @@ class ESP32P4 {
         return this.chip;
     }
 
-    // ── SPI attach (needed after sync on some ROM versions) ─────────────────
+    // ── SPI attach — ESP32-P4 does NOT use CMD_SPI_ATTACH (no-op kept for compat)
 
     async spiAttach() {
-        try {
-            const data = new Uint8Array(8); // hspi=0
-            await this._cmd(CMD_SPI_ATTACH, data, 0, 2000);
-        } catch (_) { /* optional, ignore */ }
+        // ESP32-P4 ROM handles SPI attach automatically; skip this command
     }
 
     // ── baud rate change ─────────────────────────────────────────────────────
@@ -883,20 +907,29 @@ class AgonVFlasher {
 
     async connect() {
         this.log(t('msgConnecting'), 'info');
-        const baud = parseInt(document.getElementById('cfgBaud').value, 10);
+        const baud   = parseInt(document.getElementById('cfgBaud').value, 10);
+        const before = document.getElementById('cfgBefore').value;
 
         try {
-            await this.serial.open(115200);   // always start at 115200 for sync
+            // Always open at 115200 first — ROM bootloader speaks 115200
+            await this.serial.open(115200);
             this.esp = new ESP32P4(this.serial, (msg, type) => this.log(msg, type));
 
-            const before = document.getElementById('cfgBefore').value;
-            if (before === 'default_reset') await this.esp.enterBootloader();
+            if (before === 'default_reset') {
+                // Auto-reset via RTS/DTR
+                await this.esp.enterBootloader();
+            } else {
+                // no_reset: user must manually hold BOOT (GPIO35) and press EN
+                this.log('Manual mode: hold BOOT button, press EN, then release BOOT.', 'warning');
+                await delay(3000); // give user time to do it
+                this.serial.flushRx();
+            }
 
             await this.esp.sync();
             await this.esp.spiAttach();
             await this.esp.detectChip();
 
-            // speed up if requested
+            // Bump baud rate for faster flashing
             if (baud !== 115200) {
                 await this.esp.changeBaud(baud, 115200);
             }
