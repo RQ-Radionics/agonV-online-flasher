@@ -1,998 +1,140 @@
 // agonV Flasher — ESP32-P4 Olimex
-// Web Serial API flasher
-// Equivalent to:
-//   python -m esptool --chip esp32p4 -b 460800 --before default_reset --after hard_reset
-//     write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m
-//     0x2000  bootloader.bin
-//     0x8000  partition-table.bin
-//     0x10000 esp32-mos.bin
+// Uses esptool-js (Espressif) for all serial protocol handling.
+// https://github.com/espressif/esptool-js
 
 'use strict';
+
+import { ESPLoader, Transport } from './esptool-bundle.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // i18n
 // ─────────────────────────────────────────────────────────────────────────────
-const i18n = {
+const LANG = (navigator.language || 'en').startsWith('es') ? 'es' : 'en';
+const STR = {
     en: {
-        browserWarning:  'Your browser does not support Web Serial API. Please use Chrome or Edge.',
-        panelConnection: 'Connection',
-        panelFlash:      'Flash Settings',
-        panelRegions:    'Flash Regions',
-        panelProgress:   'Progress',
-        panelMap:        'Flash Memory Map (16 MB)',
-        panelLog:        'Log',
-        connect:         'Connect Device',
-        disconnect:      'Disconnect',
-        flash:           'Flash All',
-        disconnected:    'Disconnected',
-        connected:       'Connected',
-        flashing:        'Flashing…',
-        done:            'Done',
-        error:           'Error',
-        cfgBaud:         'Baud Rate',
-        cfgFlashMode:    'Flash Mode',
-        cfgFlashSize:    'Flash Size',
-        cfgFlashFreq:    'Flash Freq',
-        cfgBefore:       'Before Flash',
-        cfgAfter:        'After Flash',
-        cfgErase:        'Erase all flash before writing',
-        cfgVerify:       'Verify after writing',
-        colOffset:       'Offset',
-        colFile:         'File (.bin)',
-        colSize:         'Size',
-        colStatus:       'Status',
-        addRegion:       '+ Add Region',
-        clearRegions:    'Clear All',
-        statWritten:     'KB Written',
-        statTotal:       'KB Total',
-        statRegion:      'Current Region',
-        statSpeed:       'KB/s',
-        statErrors:      'Errors',
-        legendEmpty:     'Empty',
-        legendPending:   'Pending',
-        legendWriting:   'Writing',
-        legendDone:      'Written',
-        legendVerified:  'Verified',
-        legendError:     'Error',
-        // log
-        msgConnecting:    'Connecting to device…',
-        msgConnected:     'Device connected — {chip}',
-        msgDisconnected:  'Disconnected',
-        msgConnectFail:   'Connection failed: {err}',
-        msgSync:          'Syncing with bootloader…',
-        msgSyncOK:        'Bootloader sync OK',
-        msgChipDetect:    'Detecting chip…',
-        msgChipFound:     'Chip: {chip}',
-        msgNoRegions:     'Add at least one flash region with a .bin file.',
-        msgFlashStart:    'Writing {name} → offset {offset} ({size} KB)',
-        msgFlashDone:     'Done! Total {size} KB in {time}s.',
-        msgFlashError:    'Flash error: {err}',
-        msgVerifying:     'Verifying {name}…',
-        msgVerifyOK:      'Verify OK',
-        msgVerifyFail:    'Verify FAILED at sector {sector}',
-        msgErasing:       'Erasing flash…',
-        msgErased:        'Flash erased.',
-        msgRegionDone:    '{name} ✓',
-        msgResetting:     'Resetting device…',
-        msgResetDone:     'Device reset.',
-        msgChangeBaud:    'Switching to {baud} baud…',
-        msgChangeBaudOK:  'Baud rate changed to {baud}.',
-        msgFileDropHere:  'Drop .bin or click…',
-        preload:          '⚡ Load agonV Default',
-        msgPreloadDone:   'Default regions loaded: {n} files ready.',
-        msgPreloadErr:    'Could not load {name}: {err}',
-        msgStubUpload:    'Uploading stub loader…',
-        msgStubReady:     'Stub running.',
-        modalTitle:       'Enter Bootloader Mode',
-        modalInstructions:'Hold BOOT, press RST/EN, release BOOT.',
-        modalWaiting:     'Waiting for bootloader…',
-        cancel:           'Cancel',
-        msgBootWait:      'Waiting for manual boot… ({s}s remaining)',
-        msgBootTimeout:   'Bootloader not detected. Reset the board manually.',
+        connect: 'Connect Device', disconnect: 'Disconnect', flash: 'Flash All',
+        preload: '⚡ Load agonV Default',
+        disconnected: 'Disconnected', connected: 'Connected',
+        flashing: 'Flashing…', done: 'Done', error: 'Error',
+        addRegion: '+ Add Region', clearRegions: 'Clear All',
+        msgConnecting: 'Connecting…',
+        msgConnected: 'Connected — {chip}',
+        msgDisconnected: 'Disconnected',
+        msgConnectFail: 'Connection failed: {err}',
+        msgFlashStart: 'Writing {name} → {offset} ({size} KB)',
+        msgFlashDone: 'Done! {size} KB in {time}s.',
+        msgFlashError: 'Flash error: {err}',
+        msgNoRegions: 'Add at least one .bin file.',
+        msgRegionDone: '{name} ✓',
+        msgResetting: 'Resetting device…',
+        msgResetDone: 'Device reset.',
+        msgPreloadDone: '{n} files loaded.',
+        msgPreloadErr: 'Could not load {name}: {err}',
+        msgFileDropHere: 'Drop .bin or click…',
+        modalTitle: 'Enter Bootloader Mode',
+        modalDone: 'Done — board is in bootloader',
+        msgBootInstructions: 'Hold BOOT → press RST → release BOOT → click Done',
+        msgChangeBaud: 'Switching to {baud} baud…',
+        msgChangeBaudOK: 'Baud rate: {baud}',
     },
     es: {
-        browserWarning:  'Tu navegador no soporta Web Serial API. Usa Chrome o Edge.',
-        panelConnection: 'Conexión',
-        panelFlash:      'Configuración de Flash',
-        panelRegions:    'Regiones de Flash',
-        panelProgress:   'Progreso',
-        panelMap:        'Mapa de Memoria Flash (16 MB)',
-        panelLog:        'Log',
-        connect:         'Conectar Dispositivo',
-        disconnect:      'Desconectar',
-        flash:           'Flashear Todo',
-        disconnected:    'Desconectado',
-        connected:       'Conectado',
-        flashing:        'Flasheando…',
-        done:            'Completado',
-        error:           'Error',
-        cfgBaud:         'Velocidad',
-        cfgFlashMode:    'Modo Flash',
-        cfgFlashSize:    'Tamaño Flash',
-        cfgFlashFreq:    'Frecuencia Flash',
-        cfgBefore:       'Antes de Flashear',
-        cfgAfter:        'Después de Flashear',
-        cfgErase:        'Borrar flash antes de escribir',
-        cfgVerify:       'Verificar después de escribir',
-        colOffset:       'Offset',
-        colFile:         'Archivo (.bin)',
-        colSize:         'Tamaño',
-        colStatus:       'Estado',
-        addRegion:       '+ Añadir Región',
-        clearRegions:    'Borrar Todo',
-        statWritten:     'KB Escritos',
-        statTotal:       'KB Total',
-        statRegion:      'Región Actual',
-        statSpeed:       'KB/s',
-        statErrors:      'Errores',
-        legendEmpty:     'Vacío',
-        legendPending:   'Pendiente',
-        legendWriting:   'Escribiendo',
-        legendDone:      'Escrito',
-        legendVerified:  'Verificado',
-        legendError:     'Error',
-        msgConnecting:    'Conectando al dispositivo…',
-        msgConnected:     'Dispositivo conectado — {chip}',
-        msgDisconnected:  'Desconectado',
-        msgConnectFail:   'Error al conectar: {err}',
-        msgSync:          'Sincronizando con bootloader…',
-        msgSyncOK:        'Sincronización OK',
-        msgChipDetect:    'Detectando chip…',
-        msgChipFound:     'Chip: {chip}',
-        msgNoRegions:     'Añade al menos una región con un archivo .bin.',
-        msgFlashStart:    'Escribiendo {name} → offset {offset} ({size} KB)',
-        msgFlashDone:     '¡Listo! {size} KB totales en {time}s.',
-        msgFlashError:    'Error de flash: {err}',
-        msgVerifying:     'Verificando {name}…',
-        msgVerifyOK:      'Verificación OK',
-        msgVerifyFail:    'Verificación FALLIDA en sector {sector}',
-        msgErasing:       'Borrando flash…',
-        msgErased:        'Flash borrado.',
-        msgRegionDone:    '{name} ✓',
-        msgResetting:     'Reseteando dispositivo…',
-        msgResetDone:     'Dispositivo reseteado.',
-        msgChangeBaud:    'Cambiando a {baud} baudios…',
-        msgChangeBaudOK:  'Velocidad cambiada a {baud}.',
-        msgFileDropHere:  'Arrastra .bin o haz clic…',
-        preload:          '⚡ Cargar agonV por defecto',
-        msgPreloadDone:   'Regiones cargadas: {n} archivos listos.',
-        msgPreloadErr:    'No se pudo cargar {name}: {err}',
-        msgStubUpload:    'Cargando stub loader…',
-        msgStubReady:     'Stub en ejecución.',
-        modalTitle:       'Entrar en Modo Bootloader',
-        modalInstructions:'Mantén BOOT, pulsa RST/EN, suelta BOOT.',
-        modalWaiting:     'Esperando bootloader…',
-        cancel:           'Cancelar',
-        msgBootWait:      'Esperando boot manual… ({s}s restantes)',
-        msgBootTimeout:   'Bootloader no detectado. Resetea la placa manualmente.',
+        connect: 'Conectar Dispositivo', disconnect: 'Desconectar', flash: 'Flashear Todo',
+        preload: '⚡ Cargar agonV por defecto',
+        disconnected: 'Desconectado', connected: 'Conectado',
+        flashing: 'Flasheando…', done: 'Listo', error: 'Error',
+        addRegion: '+ Añadir Región', clearRegions: 'Limpiar Todo',
+        msgConnecting: 'Conectando…',
+        msgConnected: 'Conectado — {chip}',
+        msgDisconnected: 'Desconectado',
+        msgConnectFail: 'Error al conectar: {err}',
+        msgFlashStart: 'Escribiendo {name} → {offset} ({size} KB)',
+        msgFlashDone: '¡Listo! {size} KB en {time}s.',
+        msgFlashError: 'Error flash: {err}',
+        msgNoRegions: 'Añade al menos un archivo .bin.',
+        msgRegionDone: '{name} ✓',
+        msgResetting: 'Reseteando dispositivo…',
+        msgResetDone: 'Dispositivo reseteado.',
+        msgPreloadDone: '{n} archivos cargados.',
+        msgPreloadErr: 'No se pudo cargar {name}: {err}',
+        msgFileDropHere: 'Suelta .bin o haz clic…',
+        modalTitle: 'Entrar en Modo Bootloader',
+        modalDone: 'Listo — la placa está en bootloader',
+        msgBootInstructions: 'Mantén BOOT → pulsa RST → suelta BOOT → clic en Listo',
+        msgChangeBaud: 'Cambiando a {baud} baud…',
+        msgChangeBaudOK: 'Velocidad: {baud}',
     },
 };
-
-let lang = 'en';
-function detectLang() {
-    const l = (navigator.language || 'en').split('-')[0].toLowerCase();
-    return i18n[l] ? l : 'en';
-}
-function t(key, params = {}) {
-    let text = (i18n[lang]?.[key]) ?? (i18n.en[key]) ?? key;
-    for (const [k, v] of Object.entries(params)) text = text.replaceAll(`{${k}}`, v);
-    return text;
-}
-function applyTranslations() {
-    lang = detectLang();
-    document.documentElement.lang = lang;
-    document.querySelectorAll('[data-i18n]').forEach(el => {
-        const v = i18n[lang]?.[el.dataset.i18n] ?? i18n.en[el.dataset.i18n];
-        if (v) el.textContent = v;
-    });
+function t(key, vars = {}) {
+    let s = (STR[LANG] || STR.en)[key] || key;
+    for (const [k, v] of Object.entries(vars)) s = s.replace(`{${k}}`, v);
+    return s;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Utilities
+// Default firmware layout
 // ─────────────────────────────────────────────────────────────────────────────
-const delay = ms => new Promise(r => setTimeout(r, ms));
-
-function le32(n) {
-    const b = new Uint8Array(4);
-    new DataView(b.buffer).setUint32(0, n >>> 0, true);
-    return b;
-}
-function readLE32(arr, offset) {
-    return new DataView(arr.buffer, arr.byteOffset + offset, 4).getUint32(0, true);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SLIP framing
-// ─────────────────────────────────────────────────────────────────────────────
-const SLIP_END     = 0xC0;
-const SLIP_ESC     = 0xDB;
-const SLIP_ESC_END = 0xDC;
-const SLIP_ESC_ESC = 0xDD;
-
-function slipEncode(data) {
-    const out = [SLIP_END];
-    for (const b of data) {
-        if      (b === SLIP_END) out.push(SLIP_ESC, SLIP_ESC_END);
-        else if (b === SLIP_ESC) out.push(SLIP_ESC, SLIP_ESC_ESC);
-        else                     out.push(b);
-    }
-    out.push(SLIP_END);
-    return new Uint8Array(out);
-}
-
-function slipDecode(raw) {
-    const out = [];
-    let esc = false;
-    let i = 0;
-    // skip leading 0xC0
-    if (raw[0] === SLIP_END) i = 1;
-    for (; i < raw.length; i++) {
-        const b = raw[i];
-        if (b === SLIP_END) break;
-        if (esc) {
-            out.push(b === SLIP_ESC_END ? SLIP_END : SLIP_ESC);
-            esc = false;
-        } else if (b === SLIP_ESC) {
-            esc = true;
-        } else {
-            out.push(b);
-        }
-    }
-    return new Uint8Array(out);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ESP ROM command constants
-// ─────────────────────────────────────────────────────────────────────────────
-const CMD_SYNC              = 0x08;
-const CMD_READ_REG          = 0x0A;
-const CMD_WRITE_REG         = 0x09;
-const CMD_FLASH_BEGIN       = 0x02;
-const CMD_FLASH_DATA        = 0x03;
-const CMD_FLASH_END         = 0x04;
-const CMD_MEM_BEGIN         = 0x05;
-const CMD_MEM_DATA          = 0x07;
-const CMD_MEM_END           = 0x06;
-const CMD_CHANGE_BAUDRATE   = 0x0F;
-const CMD_FLASH_DEFL_BEGIN  = 0x10;
-const CMD_FLASH_DEFL_DATA   = 0x11;
-const CMD_FLASH_DEFL_END    = 0x12;
-
-const ESP_CHECKSUM_MAGIC = 0xEF;
-
-function espChecksum(data) {
-    let cs = ESP_CHECKSUM_MAGIC;
-    for (const b of data) cs ^= b;
-    return cs & 0xFF;
-}
-
-function buildPacket(op, data, chk = 0) {
-    const buf = new Uint8Array(8 + data.length);
-    const v   = new DataView(buf.buffer);
-    v.setUint8(0, 0x00);            // direction = request
-    v.setUint8(1, op);
-    v.setUint16(2, data.length, true);
-    v.setUint32(4, chk, true);
-    buf.set(data, 8);
-    return buf;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// WebSerialPort
-// ─────────────────────────────────────────────────────────────────────────────
-class WebSerialPort {
-    constructor() {
-        this.port    = null;
-        this.reader  = null;
-        this.writer  = null;
-        this._buf    = [];
-        this._active = false;
-    }
-
-    get isOpen() { return !!this.port; }
-
-    async open(baudRate = 115200) {
-        this.port = await navigator.serial.requestPort();
-        await this._openPort(baudRate);
-    }
-
-    async _openPort(baudRate) {
-        await this.port.open({ baudRate, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' });
-        this.writer = this.port.writable.getWriter();
-        this._active = true;
-        this._rxLoop();
-    }
-
-    // After USB-JTAG reset the port disconnects and reconnects as a new device.
-    // Wait for it to reappear in the list of previously-granted ports.
-    async waitReconnect(timeoutMs = 5000) {
-        const deadline = Date.now() + timeoutMs;
-        while (Date.now() < deadline) {
-            const ports = await navigator.serial.getPorts();
-            // find a port that is not currently open (the reconnected one)
-            const fresh = ports.find(p => p !== this.port);
-            if (fresh) {
-                this.port = fresh;
-                return true;
-            }
-            await delay(200);
-        }
-        return false;
-    }
-
-    async _rxLoop() {
-        // Mirror esptool-js readLoop: acquire and release reader each iteration
-        // so the readable stream is never permanently locked. This prevents
-        // write() from blocking when the stream is held by a long read.
-        while (this._active && this.port?.readable) {
-            this.reader = this.port.readable.getReader();
-            try {
-                const { value, done } = await this.reader.read();
-                if (done) break;
-                if (value?.length) {
-                    for (const b of value) this._buf.push(b);
-                }
-            } catch (e) {
-                // Non-fatal USB errors (BufferOverrun, Framing, etc.) — keep going
-                const nonFatal = ['BufferOverrunError','FramingError','BreakError','ParityError'];
-                if (e?.name && nonFatal.includes(e.name)) continue;
-                break;
-            } finally {
-                try { this.reader.releaseLock(); } catch (_) {}
-            }
-        }
-    }
-
-    async close() {
-        this._active = false;
-        // Cancel active reader if any (unblocks the _rxLoop)
-        try { await this.reader?.cancel(); } catch (_) {}
-        // Wait briefly for _rxLoop to exit and release the lock
-        await delay(50);
-        try { this.writer?.releaseLock(); } catch (_) {}
-        try { await this.port?.close();   } catch (_) {}
-        this.reader = this.writer = this.port = null;
-        this._buf = [];
-    }
-
-    async write(data) { await this.writer.write(data); }
-
-    flushRx() { this._buf = []; }
-
-    async waitBytes(n, timeoutMs = 4000) {
-        const t = Date.now() + timeoutMs;
-        while (Date.now() < t) {
-            if (this._buf.length >= n) return new Uint8Array(this._buf.splice(0, n));
-            await delay(5);
-        }
-        throw new Error(`Serial timeout waiting for ${n} bytes (have ${this._buf.length})`);
-    }
-
-    async readSlipPacket(timeoutMs = 4000) {
-        const t = Date.now() + timeoutMs;
-        while (Date.now() < t) {
-            const s = this._buf.indexOf(SLIP_END);
-            if (s !== -1) {
-                const e = this._buf.indexOf(SLIP_END, s + 1);
-                if (e !== -1) {
-                    const raw = new Uint8Array(this._buf.splice(0, e + 1));
-                    return slipDecode(raw);
-                }
-            }
-            await delay(5);
-        }
-        // Log what's in the buffer at timeout
-        const preview = this._buf.slice(0, 32).map(b => b.toString(16).padStart(2,'0')).join(' ');
-        throw new Error(`SLIP packet timeout (${this._buf.length}B in buf: ${preview || 'empty'})`);
-    }
-
-    async setSignals(sig) {
-        if (this.port?.setSignals) await this.port.setSignals(sig);
-    }
-
-    // Reopen at different baud rate (keep same port object)
-    async changeBaud(newBaud) {
-        this._active = false;
-        try { await this.reader?.cancel(); } catch (_) {}
-        await delay(50);  // let _rxLoop exit
-        try { this.writer?.releaseLock(); } catch (_) {}
-        try { await this.port?.close(); }   catch (_) {}
-        await delay(100);
-        await this._openPort(newBaud);
-        this._buf = [];
-    }
-
-    // Peek at raw buffer contents for diagnostics (hex string)
-    peekRaw(n = 32) {
-        return this._buf.slice(0, n).map(b => b.toString(16).padStart(2,'0')).join(' ');
-    }
-
-    get rxLen() { return this._buf.length; }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ESP32-P4 flasher protocol
-// ─────────────────────────────────────────────────────────────────────────────
-class ESP32P4 {
-    // Flash geometry
-    static SECTOR      = 4096;    // 4 KB erase unit
-    static CHUNK       = 0x4000;  // 16 KB per flash_data / flash_defl_data packet
-    static MEM_CHUNK   = 0x800;   // 2 KB per mem_data packet (stub upload) — conservative for USB-JTAG ROM
-
-    constructor(serial, logFn) {
-        this.s       = serial;
-        this.log     = logFn;
-        this.chip    = 'ESP32-P4';
-        this.stubRunning = false;  // true once stub is loaded and running
-    }
-
-    // ── low-level command ─────────────────────────────────────────────────────
-
-    async _cmd(op, data = new Uint8Array(0), chk = 0, timeoutMs = 3000) {
-        const pkt = buildPacket(op, data, chk);
-        await this.s.write(slipEncode(pkt));
-
-        // Mirror esptool command(): loop up to 100 packets looking for a response
-        // with direction=1 (response) and op_ret == op.  Discard anything else
-        // (stray 0xC0 keepalives, leftover packets from previous commands, etc.)
-        const deadline = Date.now() + timeoutMs;
-        for (let retry = 0; retry < 100; retry++) {
-            const remaining = deadline - Date.now();
-            if (remaining <= 0) break;
-            let resp;
-            try {
-                resp = await this.s.readSlipPacket(remaining);
-            } catch (e) {
-                throw new Error(`CMD 0x${op.toString(16)}: ${e.message}`);
-            }
-            if (resp.length < 8) {
-                this.log(`CMD 0x${op.toString(16)} stray short packet (${resp.length}B), retrying…`, 'debug');
-                continue;
-            }
-            if (resp[0] !== 0x01) {
-                this.log(`CMD 0x${op.toString(16)} non-response dir=${resp[0]}, retrying…`, 'debug');
-                continue;
-            }
-            if (resp[1] !== op) {
-                this.log(`CMD 0x${op.toString(16)} wrong op=${resp[1].toString(16)}, retrying…`, 'debug');
-                continue;
-            }
-            if (resp[8] !== 0) throw new Error(`CMD 0x${op.toString(16)} ROM error: status=${resp[8]} errCode=${resp[9]}`);
-            return { value: readLE32(resp, 4), status: resp[8], errCode: resp[9] || 0, data: resp.slice(8) };
-        }
-        throw new Error(`CMD 0x${op.toString(16)}: no matching response within ${timeoutMs}ms`);
-    }
-
-    // ── USB-JTAG/Serial reset (esptool USBJTAGSerialReset) ────────────────────
-    //
-    // The ESP32-P4 Olimex uses the internal USB-Serial/JTAG peripheral.
-    // DTR/RTS from the CDC interface map to internal signals — NOT to GPIO35/EN
-    // directly. The reset sequence is different from ClassicReset.
-    //
-    // USBJTAGSerialReset (esptool reset.py):
-    //   RTS=0, DTR=0  → idle
-    //   DTR=1         → set IO0 low
-    //   RTS=0
-    //   RTS=1, DTR=0  → EN=LOW (reset), go through (1,1) state
-    //   RTS=1         (Windows workaround: set RTS again)
-    //   DTR=0, RTS=0  → chip out of reset → boots into download mode
-
-    // USB-JTAG/Serial on the ESP32-P4 Olimex does NOT route RTS/DTR to EN/GPIO35.
-    // Hardware reset must be done manually: hold BOOT (GPIO35), press RST/EN, release BOOT.
-    // We show a modal with instructions and wait up to 30s for the first SLIP byte (0xC0)
-    // to appear, which means the ROM bootloader is running and has responded to a sync.
-
-    async enterBootloader() {
-        this.log('Manual boot required — showing instructions…', 'info');
-        this.s.flushRx();
-        // Show the modal with instructions — it resolves when the user
-        // clicks OK/Close (or after timeout). We don't try to sync here;
-        // the sync loop below handles that independently.
-        await this._showBootModal(60);
-    }
-
-    async resetHard() {
-        // After flashing, stub triggers reset via watchdog write — no RTS needed
-        // Write LP WDT registers to force reset (from esp32p4.py watchdog_reset)
-        const WDT_WPROTECT = 0x50116018;
-        const WDT_CONFIG0  = 0x50116000;
-        const WDT_CONFIG1  = 0x50116004;
-        const WDT_WKEY     = 0x50D83AA1;
-        try {
-            await this._writeReg(WDT_WPROTECT, WDT_WKEY);      // unlock
-            await this._writeReg(WDT_CONFIG1,  2000);           // timeout
-            await this._writeReg(WDT_CONFIG0,  (1<<31)|(5<<28)|(1<<8)|2); // enable
-            await this._writeReg(WDT_WPROTECT, 0);              // lock
-            await delay(600);
-        } catch (_) {}
-    }
-
-    async _writeReg(addr, val) {
-        const data = new Uint8Array(16);
-        const v = new DataView(data.buffer);
-        v.setUint32(0,  addr, true);
-        v.setUint32(4,  val,  true);
-        v.setUint32(8,  0,    true);  // mask
-        v.setUint32(12, 0,    true);  // delay_us
-        await this._cmd(CMD_WRITE_REG, data, 0, 2000);
-    }
-
-    // ── boot modal ───────────────────────────────────────────────────────────
-
-    _closeModal() {
-        const modal = document.getElementById('bootModal');
-        if (modal) modal.style.display = 'none';
-    }
-
-    async _showBootModal(seconds) {
-        // Modal is purely informational — shows instructions and a countdown.
-        // Resolves when the user clicks OK, or after timeout.
-        // Never rejects (cancel = OK, just means "I'm ready").
-        const modal     = document.getElementById('bootModal');
-        const timerEl   = document.getElementById('modalTimer');
-        const cancelBtn = document.getElementById('modalCancelBtn');
-
-        modal.style.display = 'flex';
-
-        return new Promise((resolve) => {
-            let done = false;
-            let tickId;
-
-            const finish = () => {
-                if (done) return;
-                done = true;
-                clearInterval(tickId);
-                this._closeModal();
-                resolve();
-            };
-
-            // OK/Cancel button — user says "I've done the boot sequence"
-            cancelBtn.addEventListener('click', finish, { once: true });
-
-            const deadline = Date.now() + seconds * 1000;
-            tickId = setInterval(() => {
-                if (done) return;
-                const rem = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-                timerEl.textContent = rem;
-                if (rem === 0) finish();
-            }, 250);
-        });
-    }
-
-    // ── sync ─────────────────────────────────────────────────────────────────
-    //
-    // Mirrors esptool _connect_attempt(): try up to N times, flush between.
-    // Each attempt: send SYNC, read 8 responses (1 + 7 extras), flush remainder.
-
-    async sync() {
-        this.log(t('msgSync'), 'info');
-        const syncData = new Uint8Array([0x07, 0x07, 0x12, 0x20, ...new Array(32).fill(0x55)]);
-
-        for (let attempt = 0; attempt < 10; attempt++) {
-            this.s.flushRx();
-            try {
-                // Send SYNC
-                const syncPkt = buildPacket(CMD_SYNC, syncData, 0);
-                await this.s.write(slipEncode(syncPkt));
-
-                // Read first ACK — must match op=0x08, direction=1
-                let gotFirst = false;
-                const t0 = Date.now();
-                while (Date.now() - t0 < 500) {
-                    let resp;
-                    try { resp = await this.s.readSlipPacket(100); } catch (_) { break; }
-                    if (resp.length >= 8 && resp[0] === 0x01 && resp[1] === CMD_SYNC) {
-                        gotFirst = true;
-                        break;
-                    }
-                }
-                if (!gotFirst) continue;
-
-                // Drain remaining 7 ACKs (ROM sends 8 total)
-                for (let i = 0; i < 7; i++) {
-                    try { await this.s.readSlipPacket(100); } catch (_) { break; }
-                }
-                // Flush anything left
-                await delay(50);
-                this.s.flushRx();
-
-                this.log(t('msgSyncOK'), 'success');
-                return; // success
-            } catch (_) {
-                // retry
-            }
-            await delay(100);
-        }
-        throw new Error('Could not sync with bootloader after 10 attempts.');
-    }
-
-    // ── read register ─────────────────────────────────────────────────────────
-
-    async readReg(addr) {
-        const r = await this._cmd(CMD_READ_REG, le32(addr));
-        return r.value;
-    }
-
-    // ── chip detect ──────────────────────────────────────────────────────────
-
-    async detectChip() {
-        this.log(t('msgChipDetect'), 'info');
-        this.chipRevision = 100; // default: assume rev 1.0 (rc1)
-        try {
-            // Read EFUSE_BLOCK1 word2 @ EFUSE_BASE+0x044+8 = 0x5012D04C
-            // major = ((word>>23)&1)<<2 | (word>>4)&3   minor = word&0xF
-            // chip revision = major*100 + minor
-            const EFUSE_BLOCK1_W2 = 0x5012D04C;
-            const word = await this.readReg(EFUSE_BLOCK1_W2);
-            const major = (((word >> 23) & 1) << 2) | ((word >> 4) & 0x03);
-            const minor = word & 0x0F;
-            this.chipRevision = major * 100 + minor;
-            this.chip = `ESP32-P4 (rev ${major}.${minor})`;
-        } catch (e) { this.chip = 'ESP32-P4'; this.log(`detectChip fallback: ${e.message}`, 'debug'); }
-        this.log(t('msgChipFound', { chip: this.chip }), 'success');
-        return this.chip;
-    }
-
-    // ── baud rate change ─────────────────────────────────────────────────────
-
-    async changeBaud(newBaud, currentBaud) {
-        this.log(t('msgChangeBaud', { baud: newBaud }), 'info');
-        const data = new Uint8Array(8);
-        const v = new DataView(data.buffer);
-        v.setUint32(0, newBaud,     true);
-        v.setUint32(4, currentBaud, true);
-        await this._cmd(CMD_CHANGE_BAUDRATE, data, 0, 2000);
-        await delay(50);
-        await this.s.changeBaud(newBaud);
-        await delay(100);
-        this.log(t('msgChangeBaudOK', { baud: newBaud }), 'success');
-    }
-
-    // ── disable watchdogs (mirrors esptool _post_connect / disable_watchdogs) ──
-    //
-    // When USB-JTAG/Serial is used, the RTC WDT and SWD watchdog are NOT reset
-    // by the ROM bootloader and can fire during stub upload / flash, resetting
-    // the board silently.  We must disable them before uploading the stub,
-    // exactly as esptool does in ESP32P4ROM._post_connect().
-    //
-    // RTC WDT registers (LP_WDT):
-    //   0x50116000  LP_WDT_CONFIG0   – set to 0 to disable
-    //   0x50116018  LP_WDT_WPROTECT  – write key 0x50D83AA1 to unlock, 0 to lock
-    //
-    // SWD (Super Watchdog):
-    //   0x5011601C  RTC_WDT_SWD_CONFIG_REG  – bit 18 = SWD_AUTO_FEED_EN
-    //   0x50116020  RTC_WDT_SWD_WPROTECT    – same key
-
-    async disableWatchdogs() {
-        const WDT_CONFIG0   = 0x50116000;
-        const WDT_WPROTECT  = 0x50116018;
-        const SWD_CONF_REG  = 0x5011601C;
-        const SWD_WPROTECT  = 0x50116020;
-        const WDT_KEY       = 0x50D83AA1;
-        const SWD_AUTO_FEED = (1 << 18);
-
-        this.log('Disabling RTC WDT and SWD…', 'debug');
-        // Disable RTC WDT
-        await this._writeReg(WDT_WPROTECT, WDT_KEY);   // unlock
-        await this._writeReg(WDT_CONFIG0,  0);          // disable
-        await this._writeReg(WDT_WPROTECT, 0);          // lock
-
-        // Enable SWD auto-feed (keeps SWD alive so it doesn't fire)
-        await this._writeReg(SWD_WPROTECT, WDT_KEY);   // unlock
-        const swdCfg = await this.readReg(SWD_CONF_REG);
-        await this._writeReg(SWD_CONF_REG, swdCfg | SWD_AUTO_FEED);
-        await this._writeReg(SWD_WPROTECT, 0);          // lock
-        this.log('Watchdogs disabled.', 'debug');
-    }
-
-    // ── read UARTDEV_BUF_NO (detect USB-JTAG) ────────────────────────────────
-    //
-    // The ROM keeps a variable at a revision-dependent address that reflects
-    // which UART/USB port is active.  Value 6 = USB-JTAG/Serial.
-    // rev < 300 → base 0x4FF3FEB0,  rev >= 300 → base 0x4FFBFEB0,  offset +24.
-
-    async readUartDevBufNo() {
-        const base = (this.chipRevision < 300) ? 0x4FF3FEB0 : 0x4FFBFEB0;
-        const addr = base + 24;
-        try {
-            const val = await this.readReg(addr);
-            this.log(`UARTDEV_BUF_NO @ 0x${addr.toString(16)}: ${val} (USB-JTAG = ${val === 6 ? 'YES ✓' : 'NO – unexpected!'})`, 'debug');
-            return val;
-        } catch (e) {
-            this.log(`Could not read UARTDEV_BUF_NO: ${e.message}`, 'warning');
-            return -1;
-        }
-    }
-
-    // ── stub loader upload ────────────────────────────────────────────────────
-    //
-    // Mirrors esptool _upload_stub():
-    //   0. disable_watchdogs()  (esptool _post_connect)
-    //   1. mem_begin(text_len, blocks, block_size, text_start)
-    //   2. mem_data(block)... for text segment
-    //   3. mem_begin(data_len, blocks, block_size, data_start)
-    //   4. mem_data(block)... for data segment
-    //   5. mem_end(0, entry)  → jump to stub entry point
-    //   6. Read SLIP-framed "OHAI" (C0 4F 48 41 49 C0) from stub
-
-    async uploadStub() {
-        this.log(t('msgStubUpload'), 'info');
-
-        // Log UARTDEV_BUF_NO so we can confirm USB-JTAG is active
-        await this.readUartDevBufNo();
-
-        // Select stub based on chip revision:
-        // revision < 300 (i.e. rev 1.x, 2.x) → RC1 stub
-        // revision >= 300 (rev 3.x+)           → final stub
-        const stub = (this.chipRevision < 300) ? ESP32P4_STUB_RC1 : ESP32P4_STUB;
-        this.log(`Using stub for rev ${this.chipRevision < 300 ? '<3.0 (rc1)' : '>=3.0'}`, 'debug');
-
-        const text = Uint8Array.from(atob(stub.text), c => c.charCodeAt(0));
-        const data = Uint8Array.from(atob(stub.data), c => c.charCodeAt(0));
-
-        await this._uploadSegment(text, stub.text_start);
-        if (data.length > 0) {
-            await this._uploadSegment(data, stub.data_start);
-        }
-
-        // mem_end: flag=0 (run), entry point
-        // The ROM sends a SLIP ACK for mem_end, then immediately the stub
-        // starts and sends raw (non-SLIP) "OHAI" (0x4F 0x48 0x41 0x49).
-        const endData = new Uint8Array(8);
-        const ev = new DataView(endData.buffer);
-        ev.setUint32(0, 0,          true); // flag=0 → jump to entry
-        ev.setUint32(4, stub.entry, true);
-
-        // Send MEM_END with short timeout — the ROM ACK comes back quickly,
-        // then the stub starts and sends SLIP-framed OHAI: C0 4F 48 41 49 C0.
-        // esptool uses MEM_END_ROM_TIMEOUT = 0.2s, reads the ACK, then reads
-        // the next SLIP packet which IS the OHAI.
-        const endPkt = buildPacket(CMD_MEM_END, endData, 0);
-        await this.s.write(slipEncode(endPkt));
-
-        // Read the ROM ACK for MEM_END (short timeout — may be fast or miss-able)
-        try {
-            const ack = await this.s.readSlipPacket(500);
-            this.log(`MEM_END ACK: status=${ack[8]} err=${ack[9]}`, 'debug');
-        } catch (_) {
-            this.log('MEM_END ACK timeout (ok — stub may have consumed it)', 'debug');
-        }
-
-        // Now read the SLIP-framed OHAI from the stub
-        // esptool: p = self.read()  → slip-decoded bytes → b"OHAI"
-        this.log(`Waiting for OHAI… (${this.s.rxLen}B already in buffer: ${this.s.peekRaw(32)})`, 'debug');
-        const ohai = await this.s.readSlipPacket(3000);
-        const ohaiHex = Array.from(ohai).map(b => b.toString(16).padStart(2,'0')).join(' ');
-        this.log(`OHAI packet (${ohai.length}B): ${ohaiHex}`, 'debug');
-
-        // Verify it spells "OHAI"
-        if (ohai.length < 4 ||
-            ohai[0] !== 0x4F || ohai[1] !== 0x48 ||
-            ohai[2] !== 0x41 || ohai[3] !== 0x49) {
-            throw new Error(`Stub sent unexpected response instead of OHAI: ${ohaiHex}`);
-        }
-
-        this.s.flushRx();
-        this.stubRunning = true;
-        this.log(t('msgStubReady'), 'success');
-    }
-
-    async _uploadSegment(segment, loadAddr) {
-        const chunkSize = ESP32P4.MEM_CHUNK;
-        const numBlocks = Math.ceil(segment.length / chunkSize);
-
-        this.log(`mem_begin: addr=0x${loadAddr.toString(16)} size=${segment.length} blocks=${numBlocks} chunkSize=${chunkSize}`, 'debug');
-
-        // mem_begin
-        const beginData = new Uint8Array(16);
-        const bv = new DataView(beginData.buffer);
-        bv.setUint32(0,  segment.length, true);
-        bv.setUint32(4,  numBlocks,      true);
-        bv.setUint32(8,  chunkSize,      true);
-        bv.setUint32(12, loadAddr,       true);
-        await this._cmd(CMD_MEM_BEGIN, beginData, 0, 3000);
-        this.log(`mem_begin OK`, 'debug');
-
-        // mem_data blocks
-        for (let seq = 0; seq < numBlocks; seq++) {
-            const start = seq * chunkSize;
-            const end   = Math.min(start + chunkSize, segment.length);
-            const chunk = segment.slice(start, end);
-
-            this.log(`mem_data seq=${seq} size=${chunk.length}`, 'debug');
-
-            const pkt = new Uint8Array(16 + chunk.length);
-            const pv  = new DataView(pkt.buffer);
-            pv.setUint32(0,  chunk.length, true);
-            pv.setUint32(4,  seq,          true);
-            pv.setUint32(8,  0,            true);
-            pv.setUint32(12, 0,            true);
-            pkt.set(chunk, 16);
-            const chk = espChecksum(chunk);
-            await this._cmd(CMD_MEM_DATA, pkt, chk, 3000);
-            this.log(`mem_data seq=${seq} OK`, 'debug');
-        }
-        this.log(`segment 0x${loadAddr.toString(16)} done`, 'debug');
-    }
-
-    // ── flash_defl_begin (stub only) ──────────────────────────────────────────
-
-    async flashDeflBegin(uncompressedSize, compressedSize, offset) {
-        const numBlocks = Math.ceil(compressedSize / ESP32P4.CHUNK);
-        const eraseSize = Math.ceil(uncompressedSize / ESP32P4.SECTOR) * ESP32P4.SECTOR;
-        const data = new Uint8Array(16);
-        const v    = new DataView(data.buffer);
-        v.setUint32(0,  eraseSize,     true);
-        v.setUint32(4,  numBlocks,     true);
-        v.setUint32(8,  ESP32P4.CHUNK, true);
-        v.setUint32(12, offset,        true);
-        const r = await this._cmd(CMD_FLASH_DEFL_BEGIN, data, 0, 30000);
-        if (r.data[1] !== 0) throw new Error(`flash_defl_begin error ${r.data[1]}`);
-    }
-
-    // ── flash_defl_data ───────────────────────────────────────────────────────
-
-    async flashDeflData(compressedChunk, seq) {
-        const pkt = new Uint8Array(16 + compressedChunk.length);
-        const v   = new DataView(pkt.buffer);
-        v.setUint32(0,  compressedChunk.length, true);
-        v.setUint32(4,  seq,                    true);
-        v.setUint32(8,  0,                      true);
-        v.setUint32(12, 0,                      true);
-        pkt.set(compressedChunk, 16);
-        const chk = espChecksum(compressedChunk);
-        const r = await this._cmd(CMD_FLASH_DEFL_DATA, pkt, chk, 10000);
-        if (r.data[1] !== 0) throw new Error(`flash_defl_data seq=${seq} error ${r.data[1]}`);
-    }
-
-    // ── flash_defl_end ────────────────────────────────────────────────────────
-
-    async flashDeflEnd(reboot = false) {
-        const data = le32(reboot ? 0 : 1);
-        try { await this._cmd(CMD_FLASH_DEFL_END, data, 0, 3000); } catch (_) {}
-    }
-
-    // ── deflate compress (uses DecompressionStream inverse via CompressionStream) ──
-
-    async _deflate(data) {
-        // Use CompressionStream API (available in Chrome 80+)
-        const cs = new CompressionStream('deflate-raw');
-        const writer = cs.writable.getWriter();
-        writer.write(data);
-        writer.close();
-        const chunks = [];
-        const reader = cs.readable.getReader();
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            chunks.push(value);
-        }
-        const total = chunks.reduce((s, c) => s + c.length, 0);
-        const out = new Uint8Array(total);
-        let pos = 0;
-        for (const c of chunks) { out.set(c, pos); pos += c.length; }
-        return out;
-    }
-
-    // ── write one region (stub + deflate) ────────────────────────────────────
-
-    async writeRegion(bin, offset, opts = {}) {
-        const { name = 'region', onProgress = ()=>{}, onSector = ()=>{} } = opts;
-
-        const total = bin.length;
-        this.log(t('msgFlashStart', {
-            name,
-            offset: `0x${offset.toString(16)}`,
-            size:   (total / 1024).toFixed(1),
-        }), 'info');
-
-        // Compress the whole region
-        this.log(`Compressing ${name}…`, 'debug');
-        const compressed = await this._deflate(bin);
-        this.log(`Compressed: ${total} → ${compressed.length} bytes (${(compressed.length/total*100).toFixed(0)}%)`, 'debug');
-
-        await this.flashDeflBegin(total, compressed.length, offset);
-
-        const chunkSize  = ESP32P4.CHUNK;
-        const numChunks  = Math.ceil(compressed.length / chunkSize);
-        const t0 = Date.now();
-        let written = 0;  // uncompressed bytes written (estimated)
-
-        for (let seq = 0; seq < numChunks; seq++) {
-            const start = seq * chunkSize;
-            const end   = Math.min(start + chunkSize, compressed.length);
-            const chunk = compressed.slice(start, end);
-
-            // Estimate uncompressed progress proportionally
-            const uncompWritten = Math.round((end / compressed.length) * total);
-            const secFirst = Math.floor((offset + (seq > 0 ? Math.round((start/compressed.length)*total) : 0)) / ESP32P4.SECTOR);
-            const secLast  = Math.floor((offset + uncompWritten - 1) / ESP32P4.SECTOR);
-            for (let s = secFirst; s <= secLast; s++) onSector(s * ESP32P4.SECTOR, 'writing');
-
-            await this.flashDeflData(chunk, seq);
-            written = uncompWritten;
-
-            for (let s = secFirst; s <= secLast; s++) onSector(s * ESP32P4.SECTOR, 'done');
-
-            const elapsed = (Date.now() - t0) / 1000 || 0.001;
-            onProgress({
-                written,
-                total,
-                percent:     (written / total * 100).toFixed(1),
-                speed:       (written / 1024 / elapsed).toFixed(1),
-                secsWritten: secLast + 1,
-            });
-        }
-
-        await this.flashDeflEnd(false);
-
-        if (opts.verify) {
-            this.log(t('msgVerifying', { name }), 'info');
-            const secFirst = Math.floor(offset / ESP32P4.SECTOR);
-            const secLast  = Math.floor((offset + total - 1) / ESP32P4.SECTOR);
-            for (let s = secFirst; s <= secLast; s++) onSector(s * ESP32P4.SECTOR, 'verified');
-            this.log(t('msgVerifyOK'), 'success');
-        }
-
-        onProgress({ written: total, total, percent: '100.0',
-            speed: ((total/1024)/((Date.now()-t0)/1000)).toFixed(1), secsWritten: Math.ceil(total/ESP32P4.SECTOR) });
-
-        this.log(t('msgRegionDone', { name }), 'success');
-    }
-}
+const AGONV_DEFAULT_REGIONS = [
+    { offset: 0x2000,  filename: 'bootloader.bin'      },
+    { offset: 0x8000,  filename: 'partition-table.bin' },
+    { offset: 0x10000, filename: 'esp32-mos.bin'        },
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Region model
 // ─────────────────────────────────────────────────────────────────────────────
 class Region {
-    constructor(offset = '0x0', file = null) {
+    constructor(offset = 0x0, file = null) {
         this.id     = `r-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        this.offset = offset;   // hex string
-        this.file   = file;     // File object or null
-        this.data   = null;     // Uint8Array after load
+        this.offset = offset;   // number
+        this.file   = file;
+        this.data   = null;     // Uint8Array
         this.status = 'pending';
     }
-
-    get offsetNum() { return parseInt(this.offset, 16); }
-    get name()      { return this.file?.name ?? '—'; }
-    get sizeKB()    { return this.data ? (this.data.length / 1024).toFixed(1) : '—'; }
-
+    get name()   { return this.file?.name ?? '—'; }
+    get sizeKB() { return this.data ? (this.data.length / 1024).toFixed(1) : '—'; }
     async load() {
         if (!this.file) return;
-        const buf = await this.file.arrayBuffer();
-        this.data = new Uint8Array(buf);
+        this.data = new Uint8Array(await this.file.arrayBuffer());
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// agonV Flasher — main application
+// Terminal adapter for esptool-js
+// ─────────────────────────────────────────────────────────────────────────────
+function makeTerminal(logFn) {
+    return {
+        clean() {},
+        writeLine(s) { logFn(s, 'debug'); },
+        write(s)     { logFn(s, 'debug'); },
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main application
 // ─────────────────────────────────────────────────────────────────────────────
 class AgonVFlasher {
-    // Flash map: 16 MB / 64 KB = 256 visual cells (one cell = one 64 KB block)
     static MAP_CELLS  = 256;
-    static CELL_BYTES = (16 * 1024 * 1024) / AgonVFlasher.MAP_CELLS; // 65536
+    static CELL_BYTES = (16 * 1024 * 1024) / AgonVFlasher.MAP_CELLS; // 64 KB
 
     constructor() {
-        this.serial  = new WebSerialPort();
-        this.esp     = null;
-        this.regions = [];
-        this.errors  = 0;
+        this.regions  = [];
+        this.errors   = 0;
+        this.device   = null;   // SerialPort
+        this.transport = null;  // esptool-js Transport
+        this.loader   = null;   // esptool-js ESPLoader
 
-        applyTranslations();
         this._checkBrowser();
         this._buildMap();
         this._bindUI();
         this._loadPrefs();
 
-        // Default regions matching the esptool command
-        this._addRegion('0x2000',  null);
-        this._addRegion('0x8000',  null);
-        this._addRegion('0x10000', null);
+        // Default regions
+        for (const d of AGONV_DEFAULT_REGIONS) this._addRegion(d.offset, null);
 
-        this.log('agonV Flasher ready.  Connect device, load .bin files, then Flash All.', 'info');
+        this.log('agonV Flasher ready.', 'info');
     }
 
-    // ── browser check ─────────────────────────────────────────────────────────
+    // ── browser check ────────────────────────────────────────────────────────
 
     _checkBrowser() {
         if (!('serial' in navigator)) {
@@ -1001,109 +143,229 @@ class AgonVFlasher {
         }
     }
 
-    // ── flash sector map ──────────────────────────────────────────────────────
+    // ── log ──────────────────────────────────────────────────────────────────
 
-    _buildMap() {
-        const map = document.getElementById('sectorMap');
-        map.innerHTML = '';
-        for (let i = 0; i < AgonVFlasher.MAP_CELLS; i++) {
-            const d = document.createElement('div');
-            d.className = 'sector empty';
-            d.id        = `cell-${i}`;
-            d.title     = `0x${(i * AgonVFlasher.CELL_BYTES).toString(16).toUpperCase()} – 0x${((i+1)*AgonVFlasher.CELL_BYTES-1).toString(16).toUpperCase()}`;
-            map.appendChild(d);
+    log(msg, type = 'info') {
+        // Suppress empty/whitespace-only debug lines from esptool-js internals
+        if (type === 'debug' && !msg.trim()) return;
+        const logDiv = document.getElementById('log');
+        const entry  = document.createElement('div');
+        entry.className = `log-entry log-${type}`;
+        entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+        logDiv.appendChild(entry);
+        logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    // ── status ───────────────────────────────────────────────────────────────
+
+    setStatus(key, cls) {
+        const el = document.getElementById('statusBadge');
+        el.textContent = t(key);
+        el.className   = `status-badge ${cls}`;
+    }
+
+    // ── progress ─────────────────────────────────────────────────────────────
+
+    updateProgress(written, total, speed, regionName) {
+        const pct = total > 0 ? (written / total * 100).toFixed(1) : 0;
+        document.getElementById('progressFill').style.width = `${pct}%`;
+        document.getElementById('progressText').textContent = `${pct}%`;
+        document.getElementById('statWritten').textContent  = (written / 1024).toFixed(1);
+        document.getElementById('statTotal').textContent    = (total   / 1024).toFixed(1);
+        document.getElementById('statSpeed').textContent    = speed ?? '—';
+        document.getElementById('statRegion').textContent   = regionName ?? '—';
+        document.getElementById('statErrors').textContent   = this.errors;
+    }
+
+    // ── boot modal (UI only) ─────────────────────────────────────────────────
+
+    _showBootModal() {
+        const modal = document.getElementById('bootModal');
+        modal.style.display = 'flex';
+        return new Promise(resolve => {
+            document.getElementById('modalDoneBtn').addEventListener('click', () => {
+                modal.style.display = 'none';
+                resolve();
+            }, { once: true });
+        });
+    }
+
+    // ── connect ───────────────────────────────────────────────────────────────
+
+    async connect() {
+        this.log(t('msgConnecting'), 'info');
+        document.getElementById('connectBtn').disabled = true;
+
+        try {
+            // Pick serial port
+            this.device = await navigator.serial.requestPort();
+
+            // Show boot instructions — user must manually enter bootloader
+            this.log(t('msgBootInstructions'), 'info');
+            await this._showBootModal();
+
+            // Build esptool-js Transport + ESPLoader
+            this.transport = new Transport(this.device);
+            this.loader = new ESPLoader({
+                transport: this.transport,
+                baudrate:  115200,
+                terminal:  makeTerminal((m, tp) => this.log(m, tp)),
+            });
+
+            // Connect with no_reset — we're already in bootloader
+            const chip = await this.loader.main('no_reset');
+            this.log(t('msgConnected', { chip }), 'success');
+            this.setStatus('connected', 'connected');
+
+            // Bump baud if needed
+            const baud = parseInt(document.getElementById('cfgBaud').value, 10);
+            if (baud !== 115200) {
+                this.log(t('msgChangeBaud', { baud }), 'info');
+                await this.loader.changeBaud();
+                this.log(t('msgChangeBaudOK', { baud }), 'success');
+            }
+
+            document.getElementById('disconnectBtn').disabled = false;
+            this._refreshFlashBtn();
+
+        } catch (err) {
+            document.getElementById('bootModal').style.display = 'none';
+            this.log(t('msgConnectFail', { err: err.message }), 'error');
+            this.setStatus('error', 'error');
+            await this._cleanup();
+            document.getElementById('connectBtn').disabled = false;
         }
     }
 
-    _cellForAddr(byteAddr) {
-        return Math.min(Math.floor(byteAddr / AgonVFlasher.CELL_BYTES), AgonVFlasher.MAP_CELLS - 1);
+    // ── disconnect ────────────────────────────────────────────────────────────
+
+    async disconnect() {
+        await this._cleanup();
+        this.log(t('msgDisconnected'), 'warning');
+        this.setStatus('disconnected', 'disconnected');
+        document.getElementById('connectBtn').disabled    = false;
+        document.getElementById('disconnectBtn').disabled = true;
+        document.getElementById('flashBtn').disabled      = true;
     }
 
-    setCell(byteAddr, state) {
-        const cell = document.getElementById(`cell-${this._cellForAddr(byteAddr)}`);
-        if (cell) cell.className = `sector ${state}`;
+    async _cleanup() {
+        try { await this.transport?.disconnect(); } catch (_) {}
+        this.transport = null;
+        this.loader    = null;
+        this.device    = null;
     }
 
-    _markRegionCells(region, state) {
-        if (!region.data) return;
-        const start = region.offsetNum;
-        const end   = start + region.data.length;
-        const cFirst = this._cellForAddr(start);
-        const cLast  = this._cellForAddr(end - 1);
-        for (let c = cFirst; c <= cLast; c++) {
-            const el = document.getElementById(`cell-${c}`);
-            if (el) el.className = `sector ${state}`;
-        }
-    }
+    // ── flash all ─────────────────────────────────────────────────────────────
 
-    _resetMap() {
-        for (let i = 0; i < AgonVFlasher.MAP_CELLS; i++) {
-            const el = document.getElementById(`cell-${i}`);
-            if (el) el.className = 'sector empty';
+    async flashAll() {
+        const ready = this.regions.filter(r => r.data);
+        if (!ready.length) { this.log(t('msgNoRegions'), 'warning'); return; }
+
+        this.errors = 0;
+        this._resetMap();
+        this.setStatus('flashing', 'flashing');
+        this._setUIEnabled(false);
+
+        const grandTotal = ready.reduce((s, r) => s + r.data.length, 0);
+        const t0 = Date.now();
+
+        try {
+            // Build fileArray for esptool-js writeFlash
+            const fileArray = ready.map(r => ({
+                data:    this.loader.ui8ToBstr(r.data),
+                address: r.offset,
+            }));
+
+            const flashMode = document.getElementById('cfgFlashMode').value;
+            const flashSize = document.getElementById('cfgFlashSize').value;
+            const flashFreq = document.getElementById('cfgFlashFreq').value;
+
+            // Mark all pending on map
+            for (const r of ready) this._markRegionCells(r, 'pending');
+
+            let grandWritten = 0;
+            await this.loader.writeFlash({
+                fileArray,
+                reportProgress: (fileIndex, written, total) => {
+                    const r = ready[fileIndex];
+                    if (r) {
+                        const delta = written - (r._lastWritten || 0);
+                        grandWritten += delta;
+                        r._lastWritten = written;
+                        const elapsed = (Date.now() - t0) / 1000 || 0.001;
+                        const speed   = (grandWritten / 1024 / elapsed).toFixed(1);
+                        this.updateProgress(grandWritten, grandTotal, speed, r.name);
+                        this._markRegionCells(r, written >= total ? 'done' : 'writing');
+                    }
+                },
+                eraseAll:  document.getElementById('cfgErase').checked,
+                compress:  true,
+                flashMode,
+                flashSize,
+                flashFreq,
+            });
+
+            for (const r of ready) {
+                r._lastWritten = 0;
+                this._setRegionStatus(r, 'done', '✓');
+                this.log(t('msgRegionDone', { name: r.name }), 'success');
+            }
+
+            // Hard reset after flash
+            this.log(t('msgResetting'), 'info');
+            const after = document.getElementById('cfgAfter').value;
+            if (after === 'hard_reset' || after === 'soft_reset') {
+                await this.loader.hardReset();
+            }
+            this.log(t('msgResetDone'), 'success');
+
+            const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+            this.log(t('msgFlashDone', { size: (grandTotal / 1024).toFixed(1), time: elapsed }), 'success');
+            this.setStatus('done', 'done');
+            this.updateProgress(grandTotal, grandTotal, '—', '—');
+
+        } catch (err) {
+            this.errors++;
+            this.log(t('msgFlashError', { err: err.message }), 'error');
+            this.setStatus('error', 'error');
         }
-        // mark loaded regions as pending
-        for (const r of this.regions) {
-            if (r.data) this._markRegionCells(r, 'pending');
-        }
+
+        this._setUIEnabled(true);
     }
 
     // ── preload default firmware ──────────────────────────────────────────────
-    //
-    // Fetches the three default .bin files that live next to index.html
-    // (same directory), creates Region objects and loads their data.
-    // Works offline if the files are present locally via a file server.
 
     async preloadDefault() {
-        this.log('Loading agonV default firmware files…', 'info');
         document.getElementById('preloadBtn').disabled = true;
-
-        // Clear existing regions
         this.regions = [];
         document.getElementById('regionsList').innerHTML = '';
 
         let loaded = 0;
         for (const def of AGONV_DEFAULT_REGIONS) {
-            // Add the region row first so the user sees it appear
             this._addRegion(def.offset, null);
             const region = this.regions[this.regions.length - 1];
-
             try {
                 const resp = await fetch(def.filename);
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                const buf  = await resp.arrayBuffer();
+                const buf = await resp.arrayBuffer();
                 region.data = new Uint8Array(buf);
-
-                // Create a synthetic File object so region.name works
-                region.file = new File([buf], def.filename, { type: 'application/octet-stream' });
-
-                // Update the row UI
-                const zone    = document.querySelector(`#row-${region.id} .file-drop-zone`);
-                const fnameEl = document.querySelector(`#row-${region.id} .fname`);
-                const sizeEl  = document.querySelector(`#row-${region.id} .region-size`);
-                if (zone)    zone.classList.add('has-file');
-                if (fnameEl) fnameEl.textContent = def.filename;
-                if (sizeEl)  { sizeEl.textContent = `${region.sizeKB} KB`; sizeEl.classList.add('loaded'); }
-
-                this.log(`  ✓ ${def.filename}  →  ${def.offset}  (${region.sizeKB} KB)`, 'success');
+                region.file = new File([buf], def.filename);
+                this._updateRegionRow(region);
                 loaded++;
             } catch (err) {
                 this.log(t('msgPreloadErr', { name: def.filename, err: err.message }), 'error');
-                this._setRegionStatus(region, 'error', '✗');
             }
         }
 
         this._resetMap();
         this._refreshFlashBtn();
         document.getElementById('preloadBtn').disabled = false;
-
-        if (loaded > 0) {
-            this.log(t('msgPreloadDone', { n: loaded }), loaded === AGONV_DEFAULT_REGIONS.length ? 'success' : 'warning');
-        }
+        if (loaded) this.log(t('msgPreloadDone', { n: loaded }), 'success');
     }
 
     // ── regions UI ───────────────────────────────────────────────────────────
 
-    _addRegion(offset = '0x0', file = null) {
+    _addRegion(offset = 0x0, file = null) {
         const r = new Region(offset, file);
         this.regions.push(r);
         this._renderRegionRow(r);
@@ -1112,29 +374,22 @@ class AgonVFlasher {
 
     _renderRegionRow(region) {
         const list = document.getElementById('regionsList');
-
-        const row = document.createElement('div');
+        const row  = document.createElement('div');
         row.className = 'region-row';
         row.id = `row-${region.id}`;
 
-        // offset input
         const offInput = document.createElement('input');
         offInput.type  = 'text';
-        offInput.value = region.offset;
+        offInput.value = `0x${region.offset.toString(16)}`;
         offInput.spellcheck = false;
         offInput.addEventListener('change', () => {
-            region.offset = offInput.value.trim();
-            this._savePrefs();
-            this._resetMap();
+            region.offset = parseInt(offInput.value.trim(), 16) || 0;
+            this._savePrefs(); this._resetMap();
         });
 
-        // file drop zone
         const zone = document.createElement('label');
         zone.className = 'file-drop-zone';
         zone.htmlFor   = `file-${region.id}`;
-
-        const icon = document.createElement('span');
-        icon.textContent = '📂';
 
         const fname = document.createElement('span');
         fname.className = 'fname';
@@ -1146,24 +401,20 @@ class AgonVFlasher {
         fileInput.id     = `file-${region.id}`;
         fileInput.addEventListener('change', e => this._onRegionFile(region, e.target.files[0], zone, fname, sizeEl));
 
-        zone.append(icon, fname, fileInput);
-
-        // drag & drop
+        zone.append(document.createTextNode('📂 '), fname, fileInput);
         zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
         zone.addEventListener('dragleave', ()  => zone.classList.remove('drag-over'));
         zone.addEventListener('drop',      e  => {
-            e.preventDefault();
-            zone.classList.remove('drag-over');
+            e.preventDefault(); zone.classList.remove('drag-over');
             const f = e.dataTransfer.files[0];
             if (f) this._onRegionFile(region, f, zone, fname, sizeEl);
         });
 
-        // size label
         const sizeEl = document.createElement('div');
         sizeEl.className = 'region-size';
+        sizeEl.id = `size-${region.id}`;
         sizeEl.textContent = '—';
 
-        // status label
         const statusEl = document.createElement('div');
         statusEl.className = 'region-status pending';
         statusEl.id        = `status-${region.id}`;
@@ -1172,15 +423,20 @@ class AgonVFlasher {
         row.append(offInput, zone, sizeEl, statusEl);
         list.appendChild(row);
 
-        // small remove button — right-click row title?  use a hidden × on hover
-        // Keep it simple: double-click row to remove
         row.addEventListener('dblclick', () => {
             this.regions = this.regions.filter(r => r.id !== region.id);
             row.remove();
-            this._savePrefs();
-            this._resetMap();
-            this._refreshFlashBtn();
+            this._savePrefs(); this._resetMap(); this._refreshFlashBtn();
         });
+    }
+
+    _updateRegionRow(region) {
+        const fname   = document.querySelector(`#row-${region.id} .fname`);
+        const zone    = document.querySelector(`#row-${region.id} .file-drop-zone`);
+        const sizeEl  = document.getElementById(`size-${region.id}`);
+        if (fname)  fname.textContent  = region.name;
+        if (zone)   zone.classList.add('has-file');
+        if (sizeEl) { sizeEl.textContent = `${region.sizeKB} KB`; sizeEl.classList.add('loaded'); }
     }
 
     async _onRegionFile(region, file, zone, fnameEl, sizeEl) {
@@ -1189,12 +445,9 @@ class AgonVFlasher {
         await region.load();
         fnameEl.textContent = file.name;
         zone.classList.add('has-file');
-        sizeEl.textContent  = `${region.sizeKB} KB`;
+        sizeEl.textContent = `${region.sizeKB} KB`;
         sizeEl.classList.add('loaded');
-        this.log(t('msgFlashStart', { name: file.name, offset: region.offset, size: region.sizeKB }), 'debug');
-        this._resetMap();
-        this._refreshFlashBtn();
-        this._savePrefs();
+        this._resetMap(); this._refreshFlashBtn(); this._savePrefs();
     }
 
     _setRegionStatus(region, state, text) {
@@ -1203,6 +456,42 @@ class AgonVFlasher {
         if (!el) return;
         el.className = `region-status ${state}`;
         el.textContent = text;
+    }
+
+    // ── flash map ─────────────────────────────────────────────────────────────
+
+    _buildMap() {
+        const map = document.getElementById('sectorMap');
+        map.innerHTML = '';
+        for (let i = 0; i < AgonVFlasher.MAP_CELLS; i++) {
+            const d = document.createElement('div');
+            d.className = 'sector empty';
+            d.id = `cell-${i}`;
+            d.title = `0x${(i * AgonVFlasher.CELL_BYTES).toString(16).toUpperCase()}`;
+            map.appendChild(d);
+        }
+    }
+
+    _cellForAddr(byteAddr) {
+        return Math.min(Math.floor(byteAddr / AgonVFlasher.CELL_BYTES), AgonVFlasher.MAP_CELLS - 1);
+    }
+
+    _markRegionCells(region, state) {
+        if (!region.data) return;
+        const cFirst = this._cellForAddr(region.offset);
+        const cLast  = this._cellForAddr(region.offset + region.data.length - 1);
+        for (let c = cFirst; c <= cLast; c++) {
+            const el = document.getElementById(`cell-${c}`);
+            if (el) el.className = `sector ${state}`;
+        }
+    }
+
+    _resetMap() {
+        for (let i = 0; i < AgonVFlasher.MAP_CELLS; i++) {
+            const el = document.getElementById(`cell-${i}`);
+            if (el) el.className = 'sector empty';
+        }
+        for (const r of this.regions) if (r.data) this._markRegionCells(r, 'pending');
     }
 
     // ── UI bindings ───────────────────────────────────────────────────────────
@@ -1217,23 +506,27 @@ class AgonVFlasher {
         document.getElementById('preloadBtn')
             .addEventListener('click', () => this.preloadDefault());
         document.getElementById('addRegionBtn')
-            .addEventListener('click', () => { this._addRegion(); });
+            .addEventListener('click', () => this._addRegion());
         document.getElementById('clearRegionsBtn')
             .addEventListener('click', () => {
                 this.regions = [];
                 document.getElementById('regionsList').innerHTML = '';
-                this._resetMap();
-                this._refreshFlashBtn();
-                this._savePrefs();
+                this._resetMap(); this._refreshFlashBtn(); this._savePrefs();
             });
-
         const saveIds = ['cfgBaud','cfgFlashMode','cfgFlashSize','cfgFlashFreq','cfgBefore','cfgAfter','cfgErase','cfgVerify'];
         saveIds.forEach(id => document.getElementById(id)?.addEventListener('change', () => this._savePrefs()));
     }
 
     _refreshFlashBtn() {
-        const hasReady = this.serial.isOpen && this.regions.some(r => r.data);
-        document.getElementById('flashBtn').disabled = !hasReady;
+        const ok = this.loader && this.regions.some(r => r.data);
+        document.getElementById('flashBtn').disabled = !ok;
+    }
+
+    _setUIEnabled(on) {
+        document.getElementById('connectBtn').disabled    =  on;
+        document.getElementById('disconnectBtn').disabled = !on;
+        document.getElementById('flashBtn').disabled      = !on;
+        document.getElementById('addRegionBtn').disabled  = !on;
     }
 
     // ── prefs ─────────────────────────────────────────────────────────────────
@@ -1241,14 +534,14 @@ class AgonVFlasher {
     _savePrefs() {
         try {
             localStorage.setItem('agonv-prefs', JSON.stringify({
-                baud:       document.getElementById('cfgBaud').value,
-                flashMode:  document.getElementById('cfgFlashMode').value,
-                flashSize:  document.getElementById('cfgFlashSize').value,
-                flashFreq:  document.getElementById('cfgFlashFreq').value,
-                before:     document.getElementById('cfgBefore').value,
-                after:      document.getElementById('cfgAfter').value,
-                erase:      document.getElementById('cfgErase').checked,
-                verify:     document.getElementById('cfgVerify').checked,
+                baud:      document.getElementById('cfgBaud').value,
+                flashMode: document.getElementById('cfgFlashMode').value,
+                flashSize: document.getElementById('cfgFlashSize').value,
+                flashFreq: document.getElementById('cfgFlashFreq').value,
+                before:    document.getElementById('cfgBefore').value,
+                after:     document.getElementById('cfgAfter').value,
+                erase:     document.getElementById('cfgErase').checked,
+                verify:    document.getElementById('cfgVerify').checked,
             }));
         } catch (_) {}
     }
@@ -1266,200 +559,7 @@ class AgonVFlasher {
             if (p.verify !== undefined) document.getElementById('cfgVerify').checked = p.verify;
         } catch (_) {}
     }
-
-    // ── status badge ──────────────────────────────────────────────────────────
-
-    setStatus(key, cls) {
-        const el = document.getElementById('statusBadge');
-        el.textContent = t(key);
-        el.className   = `status-badge ${cls}`;
-    }
-
-    // ── log ───────────────────────────────────────────────────────────────────
-
-    log(msg, type = 'info') {
-        const logDiv = document.getElementById('log');
-        const entry  = document.createElement('div');
-        entry.className = `log-entry log-${type}`;
-        entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-        logDiv.appendChild(entry);
-        logDiv.scrollTop = logDiv.scrollHeight;
-    }
-
-    // ── progress ──────────────────────────────────────────────────────────────
-
-    updateProgress(written, total, speed, regionName) {
-        const pct = total > 0 ? (written / total * 100).toFixed(1) : 0;
-        document.getElementById('progressFill').style.width = `${pct}%`;
-        document.getElementById('progressText').textContent = `${pct}%`;
-        document.getElementById('statWritten').textContent  = (written / 1024).toFixed(1);
-        document.getElementById('statTotal').textContent    = (total / 1024).toFixed(1);
-        document.getElementById('statSpeed').textContent    = speed;
-        document.getElementById('statRegion').textContent   = regionName ?? '—';
-        document.getElementById('statErrors').textContent   = this.errors;
-    }
-
-    // ── connect ───────────────────────────────────────────────────────────────
-
-    async connect() {
-        this.log(t('msgConnecting'), 'info');
-        const baud   = parseInt(document.getElementById('cfgBaud').value, 10);
-        const before = document.getElementById('cfgBefore').value;
-
-        try {
-            // Always open at 115200 first — ROM bootloader speaks 115200
-            await this.serial.open(115200);
-            this.esp = new ESP32P4(this.serial, (msg, type) => this.log(msg, type));
-
-            // Always use manual boot modal — USB-JTAG cannot auto-reset
-            await this.esp.enterBootloader();
-
-            await this.esp.sync();
-
-            // Disable watchdogs IMMEDIATELY after sync, before any other command.
-            // The firmware running before bootloader entry may have armed the LP WDT
-            // and SWD with short timeouts — they will fire within ~1-2s and reset
-            // the chip silently, causing all subsequent commands to see empty buffers.
-            // esptool does this in _post_connect() which runs right after connect().
-            await this.esp.disableWatchdogs();
-
-            await this.esp.detectChip();
-
-            // Upload stub — required for USB-JTAG/Serial mode and deflate flash
-            await this.esp.uploadStub();
-
-            // Bump baud rate after stub is running (stub supports high bauds)
-            if (baud !== 115200) {
-                await this.esp.changeBaud(baud, 115200);
-            }
-
-            this.log(t('msgConnected', { chip: this.esp.chip }), 'success');
-            this.setStatus('connected', 'connected');
-
-            document.getElementById('connectBtn').disabled    = true;
-            document.getElementById('disconnectBtn').disabled = false;
-            this._refreshFlashBtn();
-
-        } catch (err) {
-            this.esp?._closeModal();   // ensure modal is never left open on error
-            this.log(t('msgConnectFail', { err: err.message }), 'error');
-            await this.serial.close().catch(() => {});
-            this.esp = null;
-            this.setStatus('error', 'error');
-            document.getElementById('connectBtn').disabled = false;
-        }
-    }
-
-    // ── disconnect ────────────────────────────────────────────────────────────
-
-    async disconnect() {
-        await this.serial.close();
-        this.esp = null;
-        this.log(t('msgDisconnected'), 'warning');
-        this.setStatus('disconnected', 'disconnected');
-        document.getElementById('connectBtn').disabled    = false;
-        document.getElementById('disconnectBtn').disabled = true;
-        document.getElementById('flashBtn').disabled      = true;
-    }
-
-    // ── flash all regions ────────────────────────────────────────────────────
-
-    async flashAll() {
-        const ready = this.regions.filter(r => r.data && !isNaN(r.offsetNum));
-        if (!ready.length) { this.log(t('msgNoRegions'), 'warning'); return; }
-
-        const erase  = document.getElementById('cfgErase').checked;
-        const verify = document.getElementById('cfgVerify').checked;
-        const after  = document.getElementById('cfgAfter').value;
-
-        this.errors = 0;
-        this._resetMap();
-        this.setStatus('flashing', 'flashing');
-
-        // sort by offset ascending
-        ready.sort((a, b) => a.offsetNum - b.offsetNum);
-
-        // total bytes across all regions
-        const grandTotal = ready.reduce((s, r) => s + r.data.length, 0);
-        let grandWritten = 0;
-        const t0 = Date.now();
-
-        // disable UI
-        this._setUIEnabled(false);
-
-        // mark all regions pending on map
-        for (const r of ready) this._markRegionCells(r, 'pending');
-
-        try {
-            if (erase) {
-                this.log(t('msgErasing'), 'warning');
-                // full chip erase via flash_begin with large eraseSize is not ideal;
-                // for now erase per-region (already handled in writeRegion)
-                this.log(t('msgErased'), 'info');
-            }
-
-            for (const region of ready) {
-                this._setRegionStatus(region, 'writing', '✍');
-                document.getElementById('statRegion').textContent = region.name;
-
-                await this.esp.writeRegion(region.data, region.offsetNum, {
-                    erase:  false, // per-region erase handled in flashBegin eraseSize
-                    verify,
-                    name:   region.name,
-                    onProgress: p => {
-                        grandWritten += parseInt(p.written) - (region._lastWritten || 0);
-                        region._lastWritten = parseInt(p.written);
-                        const elapsed = (Date.now() - t0) / 1000 || 0.001;
-                        const speed   = (grandWritten / 1024 / elapsed).toFixed(1);
-                        this.updateProgress(grandWritten, grandTotal, speed, region.name);
-                    },
-                    onSector: (addr, state) => this.setCell(addr, state),
-                });
-
-                region._lastWritten = 0;
-                this._setRegionStatus(region, 'done', '✓');
-            }
-
-            // final reboot
-            this.log(t('msgResetting'), 'info');
-            if (after === 'hard_reset' || after === 'soft_reset') {
-                await this.esp.flashDeflEnd(true);
-                await this.esp.resetHard();
-            }
-            this.log(t('msgResetDone'), 'success');
-
-            const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-            this.log(t('msgFlashDone', { size: (grandTotal / 1024).toFixed(1), time: elapsed }), 'success');
-            this.setStatus('done', 'done');
-            this.updateProgress(grandTotal, grandTotal, '—', '—');
-
-        } catch (err) {
-            this.errors++;
-            this.log(t('msgFlashError', { err: err.message }), 'error');
-            this.setStatus('error', 'error');
-            document.getElementById('statErrors').textContent = this.errors;
-        }
-
-        this._setUIEnabled(true);
-    }
-
-    _setUIEnabled(on) {
-        document.getElementById('connectBtn').disabled    = on;    // re-enable after
-        document.getElementById('disconnectBtn').disabled = !on;
-        document.getElementById('flashBtn').disabled      = !on;
-        document.getElementById('addRegionBtn').disabled  = !on;
-    }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Default agonV firmware layout
-// Matches: esptool write_flash 0x2000 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-mos.bin
-// ─────────────────────────────────────────────────────────────────────────────
-const AGONV_DEFAULT_REGIONS = [
-    { offset: '0x2000',  filename: 'bootloader.bin'      },
-    { offset: '0x8000',  filename: 'partition-table.bin' },
-    { offset: '0x10000', filename: 'esp32-mos.bin'        },
-];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bootstrap
