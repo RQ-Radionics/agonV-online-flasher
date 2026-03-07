@@ -281,10 +281,31 @@ class WebSerialPort {
 
     async open(baudRate = 115200) {
         this.port = await navigator.serial.requestPort();
+        await this._openPort(baudRate);
+    }
+
+    async _openPort(baudRate) {
         await this.port.open({ baudRate, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' });
         this.writer = this.port.writable.getWriter();
         this._active = true;
         this._rxLoop();
+    }
+
+    // After USB-JTAG reset the port disconnects and reconnects as a new device.
+    // Wait for it to reappear in the list of previously-granted ports.
+    async waitReconnect(timeoutMs = 5000) {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            const ports = await navigator.serial.getPorts();
+            // find a port that is not currently open (the reconnected one)
+            const fresh = ports.find(p => p !== this.port);
+            if (fresh) {
+                this.port = fresh;
+                return true;
+            }
+            await delay(200);
+        }
+        return false;
     }
 
     async _rxLoop() {
@@ -341,7 +362,7 @@ class WebSerialPort {
         if (this.port?.setSignals) await this.port.setSignals(sig);
     }
 
-    // Reopen at different baud rate (keep same port)
+    // Reopen at different baud rate (keep same port object)
     async changeBaud(newBaud) {
         this._active = false;
         try { await this.reader?.cancel(); } catch (_) {}
@@ -349,12 +370,16 @@ class WebSerialPort {
         try { this.writer?.releaseLock(); } catch (_) {}
         try { await this.port?.close(); }   catch (_) {}
         await delay(100);
-        await this.port.open({ baudRate: newBaud, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' });
-        this.writer  = this.port.writable.getWriter();
-        this._active = true;
-        this._buf    = [];
-        this._rxLoop();
+        await this._openPort(newBaud);
+        this._buf = [];
     }
+
+    // Peek at raw buffer contents for diagnostics (hex string)
+    peekRaw(n = 32) {
+        return this._buf.slice(0, n).map(b => b.toString(16).padStart(2,'0')).join(' ');
+    }
+
+    get rxLen() { return this._buf.length; }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -400,15 +425,44 @@ class ESP32P4 {
 
     async enterBootloader() {
         this.log('USB-JTAG/Serial reset sequence…', 'debug');
-        await this.s.setSignals({ requestToSend: false, dataTerminalReady: false }); // idle
+
+        // Send the reset signals while we still have the port open
+        await this.s.setSignals({ requestToSend: false, dataTerminalReady: false });
         await delay(100);
         await this.s.setSignals({ dataTerminalReady: true,  requestToSend: false }); // IO0=low
         await delay(100);
-        await this.s.setSignals({ requestToSend: true,  dataTerminalReady: false }); // EN=low (reset)
-        await this.s.setSignals({ requestToSend: true,  dataTerminalReady: false }); // RTS again (Windows)
+        await this.s.setSignals({ requestToSend: true,  dataTerminalReady: false }); // EN=low
+        await this.s.setSignals({ requestToSend: true,  dataTerminalReady: false }); // RTS again
         await delay(100);
-        await this.s.setSignals({ dataTerminalReady: false, requestToSend: false }); // release → boot!
-        await delay(500);
+        await this.s.setSignals({ dataTerminalReady: false, requestToSend: false }); // release
+
+        // USB-JTAG: the port disconnects and reconnects after reset.
+        // Close our side, wait for the OS to re-enumerate the device,
+        // then reopen at 115200.
+        this.log('Port will disconnect during reset — waiting for reconnect…', 'debug');
+        this.s._active = false;
+        try { await this.s.reader?.cancel(); } catch (_) {}
+        try { this.s.reader?.releaseLock();  } catch (_) {}
+        try { this.s.writer?.releaseLock();  } catch (_) {}
+        try { await this.s.port?.close();    } catch (_) {}
+        this.s._buf = [];
+
+        // Give the OS time to re-enumerate USB
+        await delay(1500);
+
+        // Reopen — port object is still valid after close/reopen cycle
+        try {
+            await this.s._openPort(115200);
+            this.log('Port reopened after reset.', 'debug');
+        } catch (e) {
+            this.log(`Port reopen failed: ${e.message} — trying waitReconnect…`, 'debug');
+            const ok = await this.s.waitReconnect(4000);
+            if (!ok) throw new Error('USB port did not reconnect after reset.');
+            await this.s._openPort(115200);
+            this.log('Port reconnected and opened.', 'debug');
+        }
+
+        await delay(300);
         this.s.flushRx();
         this.log('Reset done, waiting for sync…', 'debug');
     }
@@ -429,6 +483,10 @@ class ESP32P4 {
         let lastErr;
         for (let i = 0; i < 16; i++) {
             try {
+                // Log what's in the buffer BEFORE flushing — helps diagnose
+                if (this.s.rxLen > 0) {
+                    this.log(`RX buffer (${this.s.rxLen}B): ${this.s.peekRaw(48)}`, 'debug');
+                }
                 this.s.flushRx();
                 this.log(`Sync attempt ${i + 1}/16…`, 'debug');
                 await this._cmd(CMD_SYNC, syncData, 0, 1500);
@@ -438,7 +496,16 @@ class ESP32P4 {
                 }
                 this.log(t('msgSyncOK'), 'success');
                 return;
-            } catch (e) { lastErr = e; await delay(100); }
+            } catch (e) {
+                lastErr = e;
+                // After failure, log what (if anything) arrived
+                if (this.s.rxLen > 0) {
+                    this.log(`  got ${this.s.rxLen}B: ${this.s.peekRaw(48)}`, 'debug');
+                } else {
+                    this.log(`  no bytes received`, 'debug');
+                }
+                await delay(100);
+            }
         }
         throw new Error(`Sync failed: ${lastErr?.message}`);
     }
