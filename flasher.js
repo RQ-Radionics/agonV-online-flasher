@@ -564,10 +564,17 @@ class ESP32P4 {
 
     async detectChip() {
         this.log(t('msgChipDetect'), 'info');
+        this.chipRevision = 100; // default: assume rev 1.0 (rc1)
         try {
-            // UART_DATE_REG @ 0x500CA08C (ESP32-P4 specific)
-            const date = await this.readReg(0x500CA08C);
-            this.chip = `ESP32-P4 (rev 0x${date.toString(16).toUpperCase()})`;
+            // Read EFUSE_BLOCK1 word2 @ EFUSE_BASE+0x044+8 = 0x5012D04C
+            // major = ((word>>23)&1)<<2 | (word>>4)&3   minor = word&0xF
+            // chip revision = major*100 + minor
+            const EFUSE_BLOCK1_W2 = 0x5012D04C;
+            const word = await this.readReg(EFUSE_BLOCK1_W2);
+            const major = (((word >> 23) & 1) << 2) | ((word >> 4) & 0x03);
+            const minor = word & 0x0F;
+            this.chipRevision = major * 100 + minor;
+            this.chip = `ESP32-P4 (rev ${major}.${minor})`;
         } catch (_) { this.chip = 'ESP32-P4'; }
         this.log(t('msgChipFound', { chip: this.chip }), 'success');
         return this.chip;
@@ -601,19 +608,25 @@ class ESP32P4 {
     async uploadStub() {
         this.log(t('msgStubUpload'), 'info');
 
-        const text = Uint8Array.from(atob(ESP32P4_STUB.text), c => c.charCodeAt(0));
-        const data = Uint8Array.from(atob(ESP32P4_STUB.data), c => c.charCodeAt(0));
+        // Select stub based on chip revision:
+        // revision < 300 (i.e. rev 1.x, 2.x) → RC1 stub
+        // revision >= 300 (rev 3.x+)           → final stub
+        const stub = (this.chipRevision < 300) ? ESP32P4_STUB_RC1 : ESP32P4_STUB;
+        this.log(`Using stub for rev ${this.chipRevision < 300 ? '<3.0 (rc1)' : '>=3.0'}`, 'debug');
 
-        await this._uploadSegment(text, ESP32P4_STUB.text_start);
+        const text = Uint8Array.from(atob(stub.text), c => c.charCodeAt(0));
+        const data = Uint8Array.from(atob(stub.data), c => c.charCodeAt(0));
+
+        await this._uploadSegment(text, stub.text_start);
         if (data.length > 0) {
-            await this._uploadSegment(data, ESP32P4_STUB.data_start);
+            await this._uploadSegment(data, stub.data_start);
         }
 
         // mem_end: reboot=0 (run), entry point
         const endData = new Uint8Array(8);
         const ev = new DataView(endData.buffer);
-        ev.setUint32(0, 0,                  true); // flag: 0 = jump to entry
-        ev.setUint32(4, ESP32P4_STUB.entry, true);
+        ev.setUint32(0, 0,     true); // flag: 0 = jump to entry
+        ev.setUint32(4, stub.entry, true);
         await this._cmd(CMD_MEM_END, endData, 0, 3000);
 
         // Stub signals it's running by sending 4 bytes: 0x4F 0x48 0x41 0x49 ("OHAI")
