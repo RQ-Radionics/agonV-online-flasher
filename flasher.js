@@ -367,7 +367,9 @@ class WebSerialPort {
             }
             await delay(5);
         }
-        throw new Error('SLIP packet timeout');
+        // Log what's in the buffer at timeout
+        const preview = this._buf.slice(0, 32).map(b => b.toString(16).padStart(2,'0')).join(' ');
+        throw new Error(`SLIP packet timeout (${this._buf.length}B in buf: ${preview || 'empty'})`);
     }
 
     async setSignals(sig) {
@@ -415,10 +417,36 @@ class ESP32P4 {
     async _cmd(op, data = new Uint8Array(0), chk = 0, timeoutMs = 3000) {
         const pkt = buildPacket(op, data, chk);
         await this.s.write(slipEncode(pkt));
-        const resp = await this.s.readSlipPacket(timeoutMs);
-        if (!resp || resp.length < 8) throw new Error(`No response to cmd 0x${op.toString(16)}`);
-        // resp[8] = status byte (0=OK), resp[9] = error byte
-        return { value: readLE32(resp, 4), status: resp[8], errCode: resp[9] || 0, data: resp.slice(8) };
+
+        // Mirror esptool command(): loop up to 100 packets looking for a response
+        // with direction=1 (response) and op_ret == op.  Discard anything else
+        // (stray 0xC0 keepalives, leftover packets from previous commands, etc.)
+        const deadline = Date.now() + timeoutMs;
+        for (let retry = 0; retry < 100; retry++) {
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) break;
+            let resp;
+            try {
+                resp = await this.s.readSlipPacket(remaining);
+            } catch (e) {
+                throw new Error(`CMD 0x${op.toString(16)}: ${e.message}`);
+            }
+            if (resp.length < 8) {
+                this.log(`CMD 0x${op.toString(16)} stray short packet (${resp.length}B), retrying…`, 'debug');
+                continue;
+            }
+            if (resp[0] !== 0x01) {
+                this.log(`CMD 0x${op.toString(16)} non-response dir=${resp[0]}, retrying…`, 'debug');
+                continue;
+            }
+            if (resp[1] !== op) {
+                this.log(`CMD 0x${op.toString(16)} wrong op=${resp[1].toString(16)}, retrying…`, 'debug');
+                continue;
+            }
+            if (resp[8] !== 0) throw new Error(`CMD 0x${op.toString(16)} ROM error: status=${resp[8]} errCode=${resp[9]}`);
+            return { value: readLE32(resp, 4), status: resp[8], errCode: resp[9] || 0, data: resp.slice(8) };
+        }
+        throw new Error(`CMD 0x${op.toString(16)}: no matching response within ${timeoutMs}ms`);
     }
 
     // ── USB-JTAG/Serial reset (esptool USBJTAGSerialReset) ────────────────────
