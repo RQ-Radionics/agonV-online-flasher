@@ -321,20 +321,34 @@ class WebSerialPort {
     }
 
     async _rxLoop() {
-        this.reader = this.port.readable.getReader();
-        try {
-            while (this._active) {
+        // Mirror esptool-js readLoop: acquire and release reader each iteration
+        // so the readable stream is never permanently locked. This prevents
+        // write() from blocking when the stream is held by a long read.
+        while (this._active && this.port?.readable) {
+            this.reader = this.port.readable.getReader();
+            try {
                 const { value, done } = await this.reader.read();
                 if (done) break;
-                for (const b of value) this._buf.push(b);
+                if (value?.length) {
+                    for (const b of value) this._buf.push(b);
+                }
+            } catch (e) {
+                // Non-fatal USB errors (BufferOverrun, Framing, etc.) — keep going
+                const nonFatal = ['BufferOverrunError','FramingError','BreakError','ParityError'];
+                if (e?.name && nonFatal.includes(e.name)) continue;
+                break;
+            } finally {
+                try { this.reader.releaseLock(); } catch (_) {}
             }
-        } catch (_) {}
+        }
     }
 
     async close() {
         this._active = false;
+        // Cancel active reader if any (unblocks the _rxLoop)
         try { await this.reader?.cancel(); } catch (_) {}
-        try { this.reader?.releaseLock(); } catch (_) {}
+        // Wait briefly for _rxLoop to exit and release the lock
+        await delay(50);
         try { this.writer?.releaseLock(); } catch (_) {}
         try { await this.port?.close();   } catch (_) {}
         this.reader = this.writer = this.port = null;
@@ -380,7 +394,7 @@ class WebSerialPort {
     async changeBaud(newBaud) {
         this._active = false;
         try { await this.reader?.cancel(); } catch (_) {}
-        try { this.reader?.releaseLock(); } catch (_) {}
+        await delay(50);  // let _rxLoop exit
         try { this.writer?.releaseLock(); } catch (_) {}
         try { await this.port?.close(); }   catch (_) {}
         await delay(100);
