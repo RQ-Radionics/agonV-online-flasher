@@ -214,7 +214,7 @@ class AgonVFlasher {
             // 3. Connect — chip must be in bootloader.
             //    esp-web-tools shows "Hold BOOT button" only on failure.
             //    We do the same: just call main() and show the error if it fails.
-            const chip = await this.loader.main('no_reset');
+            const chip = await this.loader.main();
             this.log(t('msgConnected', { chip }), 'success');
             this.setStatus('connected', 'connected');
 
