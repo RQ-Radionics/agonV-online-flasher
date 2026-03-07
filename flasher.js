@@ -442,13 +442,10 @@ class ESP32P4 {
 
     async enterBootloader() {
         this.log('Manual boot required — showing instructions…', 'info');
-
-        // Flush any app output already in the buffer
         this.s.flushRx();
-
-        // Show modal and start countdown
-        const cancelled = await this._showBootModal(30);
-        if (cancelled) throw new Error('Cancelled by user.');
+        // _showBootModal resolves on sync or rejects on cancel/timeout
+        // The modal is always closed before the promise settles
+        await this._showBootModal(30);
     }
 
     async resetHard() {
@@ -478,7 +475,11 @@ class ESP32P4 {
     }
 
     // ── boot modal ───────────────────────────────────────────────────────────
-    // Returns true if cancelled, false if bootloader detected in time.
+
+    _closeModal() {
+        const modal = document.getElementById('bootModal');
+        if (modal) modal.style.display = 'none';
+    }
 
     async _showBootModal(seconds) {
         const modal     = document.getElementById('bootModal');
@@ -486,41 +487,62 @@ class ESP32P4 {
         const cancelBtn = document.getElementById('modalCancelBtn');
 
         modal.style.display = 'flex';
-        let cancelled = false;
-        const onCancel = () => { cancelled = true; };
-        cancelBtn.addEventListener('click', onCancel, { once: true });
 
-        const deadline = Date.now() + seconds * 1000;
-        let detected   = false;
+        // Wrap everything in a promise so we can resolve/reject cleanly
+        // and ALWAYS close the modal before resolving
+        return new Promise((resolve, reject) => {
+            let done     = false;
+            let intervalId, tickId;
 
-        while (Date.now() < deadline && !cancelled) {
-            const remaining = Math.ceil((deadline - Date.now()) / 1000);
-            timerEl.textContent = remaining;
-            this.log(t('msgBootWait', { s: remaining }), 'debug');
+            const finish = (err) => {
+                if (done) return;
+                done = true;
+                clearInterval(intervalId);
+                clearInterval(tickId);
+                this._closeModal();
+                if (err) reject(err);
+                else     resolve();
+            };
 
-            // Try one sync — if it works we're in bootloader mode
+            // Cancel button
+            cancelBtn.addEventListener('click', () => {
+                finish(new Error('Cancelled by user.'));
+            }, { once: true });
+
             const syncData = new Uint8Array([0x07, 0x07, 0x12, 0x20, ...new Array(32).fill(0x55)]);
-            try {
-                this.s.flushRx();
-                await this._cmd(CMD_SYNC, syncData, 0, 1000);
-                for (let j = 0; j < 8; j++) {
-                    try { await this.s.readSlipPacket(150); } catch (_) {}
+            const deadline = Date.now() + seconds * 1000;
+
+            // Update countdown display every second
+            tickId = setInterval(() => {
+                if (done) return;
+                const rem = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+                timerEl.textContent = rem;
+            }, 250);
+
+            // Try sync every 800ms
+            let syncing = false;
+            intervalId = setInterval(async () => {
+                if (done || syncing) return;
+                if (Date.now() >= deadline) {
+                    finish(new Error(t('msgBootTimeout')));
+                    return;
                 }
-                detected = true;
-                break;
-            } catch (_) {
-                // Not yet — keep waiting
-            }
-            await delay(500);
-        }
-
-        modal.style.display = 'none';
-        cancelBtn.removeEventListener('click', onCancel);
-
-        if (cancelled) return true;
-        if (!detected) throw new Error(t('msgBootTimeout'));
-        this.log(t('msgSyncOK'), 'success');
-        return false;
+                syncing = true;
+                try {
+                    this.s.flushRx();
+                    await this._cmd(CMD_SYNC, syncData, 0, 600);
+                    // drain extra ACKs
+                    for (let j = 0; j < 8; j++) {
+                        try { await this.s.readSlipPacket(100); } catch (_) {}
+                    }
+                    this.log(t('msgSyncOK'), 'success');
+                    finish(null);
+                } catch (_) {
+                    // not yet
+                }
+                syncing = false;
+            }, 800);
+        });
     }
 
     // ── sync ─────────────────────────────────────────────────────────────────
@@ -1153,10 +1175,12 @@ class AgonVFlasher {
             this._refreshFlashBtn();
 
         } catch (err) {
+            this.esp?._closeModal();   // ensure modal is never left open on error
             this.log(t('msgConnectFail', { err: err.message }), 'error');
             await this.serial.close().catch(() => {});
             this.esp = null;
             this.setStatus('error', 'error');
+            document.getElementById('connectBtn').disabled = false;
         }
     }
 

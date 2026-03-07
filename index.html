@@ -409,25 +409,28 @@
 </div>
 
 <!-- ── Boot modal ── -->
-<div id="bootModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75);
-     z-index:100; align-items:center; justify-content:center;">
+<div id="bootModal" style="display:none; position:fixed; top:20px; left:50%;
+     transform:translateX(-50%); z-index:100; width:min(460px, 92vw);">
     <div style="background:#16213e; border:1px solid #00d4ff; border-radius:12px;
-                padding:30px 36px; max-width:420px; width:90%; text-align:center;">
-        <div style="font-size:2.5rem; margin-bottom:12px;">🔌</div>
-        <h2 style="color:#00d4ff; margin:0 0 16px; font-size:1.1rem; letter-spacing:1px;"
-            data-i18n="modalTitle">Enter Bootloader Mode</h2>
-        <p style="color:#aaa; font-size:13px; line-height:1.7; margin:0 0 20px;"
-           data-i18n="modalInstructions">
-            The USB-JTAG port cannot reset the chip automatically.<br><br>
-            <strong style="color:#ffc107;">1.</strong> Hold the <strong style="color:#4ecca3;">BOOT</strong> button<br>
-            <strong style="color:#ffc107;">2.</strong> Press and release <strong style="color:#4ecca3;">RST / EN</strong><br>
-            <strong style="color:#ffc107;">3.</strong> Release <strong style="color:#4ecca3;">BOOT</strong>
-        </p>
-        <div style="background:#0a0a15; border-radius:6px; padding:10px; margin-bottom:20px;">
-            <div style="font-size:11px; color:#555; margin-bottom:6px;" data-i18n="modalWaiting">Waiting for bootloader…</div>
-            <div id="modalTimer" style="font-size:22px; font-weight:700; color:#00d4ff; font-family:monospace;">30</div>
+                padding:22px 28px; box-shadow:0 8px 40px rgba(0,0,0,0.8);">
+        <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px;">
+            <div style="font-size:1.8rem; line-height:1;">🔌</div>
+            <h2 style="color:#00d4ff; margin:0; font-size:1rem; letter-spacing:1px; flex:1;"
+                data-i18n="modalTitle">Enter Bootloader Mode</h2>
+            <div style="background:#0a0a15; border-radius:6px; padding:4px 12px; text-align:center; min-width:52px;">
+                <div style="font-size:10px; color:#555;" data-i18n="modalWaiting">Waiting…</div>
+                <div id="modalTimer" style="font-size:20px; font-weight:700; color:#00d4ff; font-family:monospace; line-height:1.2;">30</div>
+            </div>
         </div>
-        <button id="modalCancelBtn" class="danger sm" data-i18n="cancel">Cancel</button>
+        <div style="display:grid; grid-template-columns:auto 1fr; gap:6px 12px; font-size:13px; color:#aaa; margin-bottom:16px; line-height:1.6;">
+            <span style="color:#ffc107; font-weight:700;">1.</span>
+            <span>Hold <strong style="color:#4ecca3;">BOOT</strong> button</span>
+            <span style="color:#ffc107; font-weight:700;">2.</span>
+            <span>Press &amp; release <strong style="color:#4ecca3;">RST / EN</strong></span>
+            <span style="color:#ffc107; font-weight:700;">3.</span>
+            <span>Release <strong style="color:#4ecca3;">BOOT</strong></span>
+        </div>
+        <button id="modalCancelBtn" class="danger sm" style="width:100%;" data-i18n="cancel">Cancel</button>
     </div>
 </div>
 
