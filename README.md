@@ -1,6 +1,6 @@
 # agonV Online Flasher
 
-Web-based firmware flasher for the **Olimex ESP32-P4** board running **agonV** (AgonLight MOS for ESP32-P4).
+Web-based firmware flasher for the **Olimex ESP32-P4-PC** board running **agonV** (AgonLight MOS for ESP32-P4).
 
 **No installation required** — runs entirely in the browser using the Web Serial API.
 
